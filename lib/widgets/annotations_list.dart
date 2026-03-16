@@ -9,9 +9,8 @@ class AnnotationsList extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final doc = ref.watch(currentDocumentProvider);
+    final doc   = ref.watch(currentDocumentProvider);
     final theme = Theme.of(context);
-
     if (doc == null) return const SizedBox.shrink();
 
     final annotations = doc.annotations
@@ -25,14 +24,11 @@ class AnnotationsList extends ConsumerWidget {
       ),
       child: Column(
         children: [
-          // ── Header ─────────────────────────────────────────────────────
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               color: theme.colorScheme.surfaceContainer,
-              border:
-                  Border(bottom: BorderSide(color: theme.dividerColor)),
+              border: Border(bottom: BorderSide(color: theme.dividerColor)),
             ),
             child: Row(
               children: [
@@ -90,8 +86,6 @@ class AnnotationsList extends ConsumerWidget {
               ],
             ),
           ),
-
-          // ── List ────────────────────────────────────────────────────────
           Expanded(
             child: annotations.isEmpty
                 ? Center(
@@ -102,15 +96,15 @@ class AnnotationsList extends ConsumerWidget {
                           Icons.layers_clear_rounded,
                           size: 40,
                           color: theme.colorScheme.onSurfaceVariant
-                              .withValues(alpha: 0.4),
+                              // ignore: deprecated_member_use
+                              .withOpacity(0.4),
                         ),
                         const SizedBox(height: 8),
                         Text(
                           'No annotations',
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color:
-                                theme.colorScheme.onSurfaceVariant,
-                          ),
+                              color:
+                                  theme.colorScheme.onSurfaceVariant),
                         ),
                       ],
                     ),
@@ -150,7 +144,8 @@ class _AnnotationTile extends ConsumerWidget {
           width: 28,
           height: 28,
           decoration: BoxDecoration(
-            color: Color(annotation.color).withValues(alpha: 0.2),
+            // ignore: deprecated_member_use
+            color: Color(annotation.color).withOpacity(0.2),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Icon(
@@ -185,17 +180,19 @@ class _AnnotationTile extends ConsumerWidget {
     );
   }
 
-  IconData _iconForType(AnnotationType t) => switch (t) {
-        AnnotationType.text => Icons.text_fields_rounded,
-        AnnotationType.highlight => Icons.highlight_rounded,
-        AnnotationType.underline => Icons.format_underline_rounded,
-        AnnotationType.strikethrough => Icons.strikethrough_s_rounded,
-        AnnotationType.freehand => Icons.draw_rounded,
-        AnnotationType.rectangle => Icons.crop_square_rounded,
-        AnnotationType.circle => Icons.circle_outlined,
-        AnnotationType.arrow => Icons.arrow_right_alt_rounded,
-        _ => Icons.layers_rounded,
-      };
+  IconData _iconForType(AnnotationType t) {
+    switch (t) {
+      case AnnotationType.text:          return Icons.text_fields_rounded;
+      case AnnotationType.highlight:     return Icons.highlight_rounded;
+      case AnnotationType.underline:     return Icons.format_underline_rounded;
+      case AnnotationType.strikethrough: return Icons.strikethrough_s_rounded;
+      case AnnotationType.freehand:      return Icons.draw_rounded;
+      case AnnotationType.rectangle:     return Icons.crop_square_rounded;
+      case AnnotationType.circle:        return Icons.circle_outlined;
+      case AnnotationType.arrow:         return Icons.arrow_right_alt_rounded;
+      default:                           return Icons.layers_rounded;
+    }
+  }
 
   String _labelForType(AnnotationType t) =>
       t.name[0].toUpperCase() + t.name.substring(1);

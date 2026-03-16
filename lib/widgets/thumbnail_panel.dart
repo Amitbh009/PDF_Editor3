@@ -37,7 +37,7 @@ class ThumbnailPanel extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 4),
               itemCount: totalPages,
               itemBuilder: (_, index) {
-                final pageNum = index + 1;
+                final pageNum   = index + 1;
                 final isSelected = pageNum == currentPage;
                 return GestureDetector(
                   onTap: () => onPageTap(pageNum),
@@ -67,8 +67,8 @@ class ThumbnailPanel extends StatelessWidget {
                               borderRadius: BorderRadius.circular(3),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black
-                                      .withValues(alpha: 0.1),
+                                  // ignore: deprecated_member_use
+                                  color: Colors.black.withOpacity(0.1),
                                   blurRadius: 2,
                                   spreadRadius: 1,
                                 ),

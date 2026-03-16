@@ -8,7 +8,7 @@ import 'editor_screen.dart';
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
-  // Deliberately returns void so the caller does not get an unawaited Future.
+  // Returns void so callers never get an unawaited Future warning.
   void _openPdf(BuildContext context, WidgetRef ref) {
     _doOpen(context, ref);
   }
@@ -18,7 +18,6 @@ class HomeScreen extends ConsumerWidget {
       type: FileType.custom,
       allowedExtensions: ['pdf'],
     );
-
     if (result == null || result.files.single.path == null) return;
     if (!context.mounted) return;
 
@@ -36,7 +35,7 @@ class HomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final size = MediaQuery.of(context).size;
+    final size  = MediaQuery.of(context).size;
 
     return Scaffold(
       backgroundColor: theme.colorScheme.surface,
@@ -101,17 +100,17 @@ class HomeScreen extends ConsumerWidget {
                     width: double.infinity,
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: theme.colorScheme.primary
-                            .withValues(alpha: 0.5),
+                        // ignore: deprecated_member_use
+                        color: theme.colorScheme.primary.withOpacity(0.5),
                         width: 2.5,
                       ),
                       borderRadius: BorderRadius.circular(24),
                       gradient: LinearGradient(
                         colors: [
-                          theme.colorScheme.primaryContainer
-                              .withValues(alpha: 0.4),
-                          theme.colorScheme.secondaryContainer
-                              .withValues(alpha: 0.2),
+                          // ignore: deprecated_member_use
+                          theme.colorScheme.primaryContainer.withOpacity(0.4),
+                          // ignore: deprecated_member_use
+                          theme.colorScheme.secondaryContainer.withOpacity(0.2),
                         ],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
@@ -152,8 +151,9 @@ class HomeScreen extends ConsumerWidget {
                         Text(
                           'Supported: .pdf',
                           style: theme.textTheme.bodySmall?.copyWith(
+                            // ignore: deprecated_member_use
                             color: theme.colorScheme.onSurfaceVariant
-                                .withValues(alpha: 0.7),
+                                .withOpacity(0.7),
                           ),
                         ),
                       ],
@@ -233,24 +233,26 @@ class HomeScreen extends ConsumerWidget {
 }
 
 class _FeatureTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-
   const _FeatureTile({
     required this.icon,
     required this.label,
     required this.color,
   });
 
+  final IconData icon;
+  final String label;
+  final Color color;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
+        // ignore: deprecated_member_use
+        color: color.withOpacity(0.12),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
+        // ignore: deprecated_member_use
+        border: Border.all(color: color.withOpacity(0.25)),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,

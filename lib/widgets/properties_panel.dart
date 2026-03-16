@@ -23,7 +23,6 @@ class PropertiesPanel extends ConsumerWidget {
       ),
       child: Column(
         children: [
-          // ── Header ─────────────────────────────────────────────────────
           Container(
             padding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -44,13 +43,10 @@ class PropertiesPanel extends ConsumerWidget {
               ],
             ),
           ),
-
-          // ── Controls ────────────────────────────────────────────────────
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                // Color
                 _Label(text: 'Color'),
                 const SizedBox(height: 8),
                 GestureDetector(
@@ -79,8 +75,6 @@ class PropertiesPanel extends ConsumerWidget {
                 ),
 
                 const SizedBox(height: 20),
-
-                // Stroke width
                 _Label(text: 'Stroke Width'),
                 Row(
                   children: [
@@ -105,8 +99,6 @@ class PropertiesPanel extends ConsumerWidget {
                 ),
 
                 const SizedBox(height: 12),
-
-                // Font size
                 _Label(text: 'Font Size'),
                 Row(
                   children: [
@@ -130,8 +122,6 @@ class PropertiesPanel extends ConsumerWidget {
                 ),
 
                 const SizedBox(height: 12),
-
-                // Opacity
                 _Label(text: 'Opacity'),
                 Row(
                   children: [
@@ -156,7 +146,6 @@ class PropertiesPanel extends ConsumerWidget {
 
                 const Divider(height: 32),
 
-                // Document info
                 if (doc != null) ...[
                   _Label(text: 'Document Info'),
                   const SizedBox(height: 8),
@@ -197,8 +186,9 @@ class PropertiesPanel extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () {
+              // ignore: deprecated_member_use
               ref.read(selectedColorProvider.notifier).state =
-                  picked.toARGB32();
+                  picked.value;
               Navigator.pop(ctx);
             },
             child: const Text('Select'),

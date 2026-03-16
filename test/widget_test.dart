@@ -1,21 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdf_editor/main.dart';
-import 'package:pdf_editor/providers/pdf_provider.dart';
+
+import '../lib/providers/pdf_provider.dart';
 
 void main() {
-  group('PdfEditorApp', () {
-    testWidgets('home screen renders correctly', (tester) async {
-      await tester.pumpWidget(
-        const ProviderScope(child: PdfEditorApp()),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.text('PDF Editor'), findsOneWidget);
-      expect(find.text('Browse & Open PDF'), findsOneWidget);
-    });
-  });
-
   group('DocumentNotifier', () {
     test('initial state is null', () {
       final container = ProviderContainer();

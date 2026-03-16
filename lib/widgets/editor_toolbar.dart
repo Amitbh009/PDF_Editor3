@@ -7,17 +7,17 @@ import '../providers/pdf_provider.dart';
 class EditorToolbar extends ConsumerWidget {
   const EditorToolbar({super.key});
 
-  static const _tools = <_ToolItem>[
-    _ToolItem(Icons.near_me_rounded,        'Select',        EditorTool.select),
-    _ToolItem(Icons.text_fields_rounded,    'Text',          EditorTool.text),
-    _ToolItem(Icons.highlight_rounded,      'Highlight',     EditorTool.highlight),
-    _ToolItem(Icons.format_underline_rounded,'Underline',    EditorTool.underline),
-    _ToolItem(Icons.strikethrough_s_rounded,'Strikethrough', EditorTool.strikethrough),
-    _ToolItem(Icons.draw_rounded,           'Freehand',      EditorTool.freehand),
-    _ToolItem(Icons.crop_square_rounded,    'Rectangle',     EditorTool.rectangle),
-    _ToolItem(Icons.circle_outlined,        'Circle',        EditorTool.circle),
-    _ToolItem(Icons.arrow_right_alt_rounded,'Arrow',         EditorTool.arrow),
-    _ToolItem(Icons.auto_fix_normal_rounded,'Eraser',        EditorTool.eraser),
+  static const List<_ToolItem> _tools = <_ToolItem>[
+    _ToolItem(Icons.near_me_rounded,         'Select',        EditorTool.select),
+    _ToolItem(Icons.text_fields_rounded,     'Text',          EditorTool.text),
+    _ToolItem(Icons.highlight_rounded,       'Highlight',     EditorTool.highlight),
+    _ToolItem(Icons.format_underline_rounded,'Underline',     EditorTool.underline),
+    _ToolItem(Icons.strikethrough_s_rounded, 'Strikethrough', EditorTool.strikethrough),
+    _ToolItem(Icons.draw_rounded,            'Freehand',      EditorTool.freehand),
+    _ToolItem(Icons.crop_square_rounded,     'Rectangle',     EditorTool.rectangle),
+    _ToolItem(Icons.circle_outlined,         'Circle',        EditorTool.circle),
+    _ToolItem(Icons.arrow_right_alt_rounded, 'Arrow',         EditorTool.arrow),
+    _ToolItem(Icons.auto_fix_normal_rounded, 'Eraser',        EditorTool.eraser),
   ];
 
   @override
@@ -38,7 +38,6 @@ class EditorToolbar extends ConsumerWidget {
         padding: const EdgeInsets.symmetric(horizontal: 8),
         child: Row(
           children: [
-            // ── Tool buttons ──────────────────────────────────────────────
             ..._tools.map(
               (item) => _ToolButton(
                 icon: item.icon,
@@ -53,7 +52,7 @@ class EditorToolbar extends ConsumerWidget {
 
             const _VSep(),
 
-            // ── Color picker swatch ───────────────────────────────────────
+            // Color swatch
             Tooltip(
               message: 'Annotation color',
               child: GestureDetector(
@@ -65,11 +64,12 @@ class EditorToolbar extends ConsumerWidget {
                   decoration: BoxDecoration(
                     color: Color(selectedColor),
                     borderRadius: BorderRadius.circular(6),
-                    border:
-                        Border.all(color: theme.colorScheme.outline, width: 2),
+                    border: Border.all(
+                        color: theme.colorScheme.outline, width: 2),
                     boxShadow: [
                       BoxShadow(
-                        color: Color(selectedColor).withValues(alpha: 0.4),
+                        // ignore: deprecated_member_use
+                        color: Color(selectedColor).withOpacity(0.4),
                         blurRadius: 4,
                         spreadRadius: 1,
                       ),
@@ -81,12 +81,10 @@ class EditorToolbar extends ConsumerWidget {
 
             const SizedBox(width: 10),
 
-            // ── Stroke label + slider ─────────────────────────────────────
             Text(
               '${strokeWidth.round()}px',
               style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+                  color: theme.colorScheme.onSurfaceVariant),
             ),
             SizedBox(
               width: 120,
@@ -102,7 +100,6 @@ class EditorToolbar extends ConsumerWidget {
 
             const _VSep(),
 
-            // ── Zoom out ──────────────────────────────────────────────────
             IconButton(
               icon: const Icon(Icons.zoom_out_rounded, size: 20),
               tooltip: 'Zoom Out',
@@ -137,7 +134,6 @@ class EditorToolbar extends ConsumerWidget {
 
             const _VSep(),
 
-            // ── Undo / Redo ───────────────────────────────────────────────
             IconButton(
               icon: const Icon(Icons.undo_rounded, size: 20),
               tooltip: 'Undo',
@@ -151,7 +147,6 @@ class EditorToolbar extends ConsumerWidget {
 
             const _VSep(),
 
-            // ── Clear all ─────────────────────────────────────────────────
             Tooltip(
               message: 'Clear all annotations',
               child: IconButton(
@@ -188,9 +183,11 @@ class EditorToolbar extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () {
-              // Use .toARGB32() (non-deprecated) on Flutter ≥ 3.27
+              // .value works on all Flutter versions (only deprecated in 3.27+,
+              // but still compiles — use ignore comment to suppress on 3.27+)
+              // ignore: deprecated_member_use
               ref.read(selectedColorProvider.notifier).state =
-                  picked.toARGB32();
+                  picked.value;
               Navigator.pop(ctx);
             },
             child: const Text('Select'),
@@ -231,27 +228,22 @@ class EditorToolbar extends ConsumerWidget {
   }
 }
 
-// ── Internal data class ───────────────────────────────────────────────────────
-
 class _ToolItem {
   const _ToolItem(this.icon, this.label, this.tool);
 
-  final IconData icon;
-  final String label;
+  final IconData   icon;
+  final String     label;
   final EditorTool tool;
 }
-
-// ── Vertical separator ────────────────────────────────────────────────────────
 
 class _VSep extends StatelessWidget {
   const _VSep();
 
   @override
-  Widget build(BuildContext context) =>
-      const SizedBox(width: 4, child: VerticalDivider(width: 8, indent: 8, endIndent: 8));
+  Widget build(BuildContext context) => const SizedBox(
+      width: 4,
+      child: VerticalDivider(width: 8, indent: 8, endIndent: 8));
 }
-
-// ── Tool button ───────────────────────────────────────────────────────────────
 
 class _ToolButton extends StatelessWidget {
   const _ToolButton({
@@ -262,10 +254,10 @@ class _ToolButton extends StatelessWidget {
     required this.onTap,
   });
 
-  final IconData icon;
-  final String label;
+  final IconData   icon;
+  final String     label;
   final EditorTool tool;
-  final bool isSelected;
+  final bool       isSelected;
   final VoidCallback onTap;
 
   @override
@@ -277,9 +269,8 @@ class _ToolButton extends StatelessWidget {
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
-          padding:
-              const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          margin:  const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
             color: isSelected
                 ? theme.colorScheme.primaryContainer
@@ -287,8 +278,8 @@ class _ToolButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             border: isSelected
                 ? Border.all(
-                    color:
-                        theme.colorScheme.primary.withValues(alpha: 0.4),
+                    // ignore: deprecated_member_use
+                    color: theme.colorScheme.primary.withOpacity(0.4),
                     width: 1,
                   )
                 : null,

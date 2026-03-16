@@ -40,8 +40,7 @@ class PageNavigator extends StatelessWidget {
           const SizedBox(width: 8),
           Text('Page ', style: theme.textTheme.bodyMedium),
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
             decoration: BoxDecoration(
               color: theme.colorScheme.primaryContainer,
               borderRadius: BorderRadius.circular(6),

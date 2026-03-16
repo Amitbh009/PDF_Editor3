@@ -23,10 +23,10 @@ class EditorScreen extends ConsumerStatefulWidget {
 
 class _EditorScreenState extends ConsumerState<EditorScreen> {
   final PdfViewerController _pdfController = PdfViewerController();
-  bool _showPropertiesPanel = false;
-  bool _showThumbnails = false;
-  bool _showAnnotationsList = false;
-  bool _isSaving = false;
+  bool _showPropertiesPanel  = false;
+  bool _showThumbnails       = false;
+  bool _showAnnotationsList  = false;
+  bool _isSaving             = false;
 
   @override
   void dispose() {
@@ -38,14 +38,14 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     final doc = ref.read(currentDocumentProvider);
     if (doc == null) return;
 
-    // Capture messenger BEFORE any await to avoid BuildContext-across-async-gap lint.
-    final messenger = ScaffoldMessenger.of(context);
+    // Capture before any await to satisfy use_build_context_synchronously
+    final messenger  = ScaffoldMessenger.of(context);
     final errorColor = Theme.of(context).colorScheme.error;
 
     setState(() => _isSaving = true);
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final ts = DateTime.now().millisecondsSinceEpoch;
+      final ts  = DateTime.now().millisecondsSinceEpoch;
       final outputPath = '${dir.path}/edited_${ts}_${doc.fileName}';
 
       await ref
@@ -98,7 +98,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
       context: ctx,
       builder: (_) => AlertDialog(
         title: const Text('Unsaved changes'),
-        content: const Text('You have unsaved changes. Save before leaving?'),
+        content: const Text(
+            'You have unsaved changes. Save before leaving?'),
         actions: [
           TextButton(
             onPressed: () {
@@ -131,7 +132,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
 
     final theme = Theme.of(context);
 
-    // PopScope replaces deprecated WillPopScope
+    // PopScope replaces the deprecated WillPopScope
     return PopScope(
       canPop: !doc.isModified,
       onPopInvokedWithResult: (bool didPop, _) {

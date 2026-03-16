@@ -1,4 +1,6 @@
 import 'dart:io';
+// Only import Offset from dart:ui — do NOT import Rect (conflicts with sf.Rect)
+import 'dart:ui' show Offset;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as sf;
@@ -8,9 +10,8 @@ import '../models/annotation_model.dart';
 final pdfServiceProvider = Provider<PdfService>((ref) => PdfService());
 
 class PdfService {
-  // ── Public API ─────────────────────────────────────────────────────────────
+  // ── Public API ──────────────────────────────────────────────────────────────
 
-  /// Returns the total page count of a PDF file.
   Future<int> getPageCount(String filePath) async {
     final bytes = await File(filePath).readAsBytes();
     final doc = sf.PdfDocument(inputBytes: bytes);
@@ -19,7 +20,6 @@ class PdfService {
     return count;
   }
 
-  /// Saves the PDF with all annotations burned in to [outputPath].
   Future<void> saveWithAnnotations(
     String sourcePath,
     List<AnnotationModel> annotations,
@@ -31,22 +31,28 @@ class PdfService {
     for (final a in annotations) {
       if (a.pageNumber < 1 || a.pageNumber > doc.pages.count) continue;
       final page = doc.pages[a.pageNumber - 1];
-
       switch (a.type) {
         case AnnotationType.text:
           _addText(page, a);
+          break;
         case AnnotationType.highlight:
           _addHighlight(page, a);
+          break;
         case AnnotationType.underline:
           _addUnderline(page, a);
+          break;
         case AnnotationType.strikethrough:
           _addStrikethrough(page, a);
+          break;
         case AnnotationType.freehand:
           _addFreehand(page, a);
+          break;
         case AnnotationType.rectangle:
           _addRectangle(page, a);
+          break;
         case AnnotationType.circle:
           _addCircle(page, a);
+          break;
         default:
           break;
       }
@@ -57,9 +63,8 @@ class PdfService {
     doc.dispose();
   }
 
-  // ── Private helpers ────────────────────────────────────────────────────────
+  // ── Helpers ─────────────────────────────────────────────────────────────────
 
-  /// Converts ARGB int → Syncfusion PdfColor, with optional opacity override.
   sf.PdfColor _sfColor(int argb, {double? opacity}) {
     final a = opacity != null
         ? (opacity * 255).round()
@@ -72,11 +77,11 @@ class PdfService {
     );
   }
 
-  /// Builds a Syncfusion Rect from annotation bounds.
+  // sf.Rect is from syncfusion_flutter_pdf — no dart:ui conflict
   sf.Rect _sfRect(AnnotationModel a) =>
       sf.Rect.fromLTWH(a.x, a.y, a.width, a.height);
 
-  // ── Writers ────────────────────────────────────────────────────────────────
+  // ── Writers ─────────────────────────────────────────────────────────────────
 
   void _addText(sf.PdfPage page, AnnotationModel a) {
     final style = a.isBold
@@ -84,13 +89,11 @@ class PdfService {
         : a.isItalic
             ? sf.PdfFontStyle.italic
             : sf.PdfFontStyle.regular;
-
     final font = sf.PdfStandardFont(
       sf.PdfFontFamily.helvetica,
       a.fontSize,
       style: style,
     );
-
     page.graphics.drawString(
       a.content,
       font,
@@ -136,10 +139,11 @@ class PdfService {
     pen.lineCap = sf.PdfLineCap.round;
     final pts = a.pathPoints!;
     for (int i = 0; i < pts.length - 1; i++) {
+      // dart:ui Offset (imported with 'show Offset' — no conflict with sf.Rect)
       page.graphics.drawLine(
         pen,
-        sf.Offset(pts[i]['x']!, pts[i]['y']!),
-        sf.Offset(pts[i + 1]['x']!, pts[i + 1]['y']!),
+        Offset(pts[i]['x']!, pts[i]['y']!),
+        Offset(pts[i + 1]['x']!, pts[i + 1]['y']!),
       );
     }
   }
