@@ -1,0 +1,34 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    # Style
+    prefer_const_constructors: true
+    prefer_const_literals_to_create_immutables: true
+    prefer_final_fields: true
+    prefer_final_locals: true
+    unnecessary_const: true
+    unnecessary_new: true
+    use_super_parameters: true
+    sized_box_for_whitespace: true
+    avoid_unnecessary_containers: true
+
+    # Safety
+    avoid_print: true
+    cancel_subscriptions: true
+    close_sinks: true
+    avoid_catching_errors: true
+    unawaited_futures: true
+
+    # Dart style
+    sort_constructors_first: true
+    always_declare_return_types: true
+    annotate_overrides: true
+
+analyzer:
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+    - lib/generated/**
+  errors:
+    invalid_annotation_target: ignore

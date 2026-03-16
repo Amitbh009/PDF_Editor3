@@ -1,0 +1,323 @@
+name: Build PDF Editor
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: '3.27.4'
+  JAVA_VERSION: '17'
+
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+
+  # ── Code quality gate (runs first, fast) ──────────────────────────────────
+  analyze:
+    name: 🔍 Analyze & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Generate code (freezed / riverpod)
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Test
+        run: flutter test --coverage
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: coverage/lcov.info
+          fail_ci_if_error: false
+
+  # ── Android APK + AAB ────────────────────────────────────────────────────
+  build-android:
+    name: 🤖 Android (APK + AAB)
+    runs-on: ubuntu-latest
+    needs: analyze
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Generate code
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      # ── Signing setup (release tags only) ──
+      - name: Decode keystore
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode \
+            > android/app/keystore.jks
+          echo "KEYSTORE_PATH=$PWD/android/app/keystore.jks" >> $GITHUB_ENV
+          echo "KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
+          echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> $GITHUB_ENV
+          echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> $GITHUB_ENV
+
+      # ── Debug build (branches / PRs) ──
+      - name: Build Debug APK
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        run: flutter build apk --debug --split-per-abi
+
+      # ── Release builds (tags only) ──
+      - name: Build Release APK
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          flutter build apk --release \
+            --split-per-abi \
+            --obfuscate \
+            --split-debug-info=build/debug-info/android/
+
+      - name: Build Release AAB
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          flutter build appbundle --release \
+            --obfuscate \
+            --split-debug-info=build/debug-info/android/
+
+      # ── Upload artifacts ──
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-${{ github.sha }}
+          path: build/app/outputs/flutter-apk/*.apk
+          retention-days: 14
+
+      - name: Upload AAB
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-aab-${{ github.sha }}
+          path: build/app/outputs/bundle/release/*.aab
+          retention-days: 30
+
+      - name: Upload debug symbols
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-symbols-${{ github.sha }}
+          path: build/debug-info/android/
+          retention-days: 90
+
+  # ── Windows EXE + Installer ──────────────────────────────────────────────
+  build-windows:
+    name: 🪟 Windows (EXE + Installer)
+    runs-on: windows-latest
+    needs: analyze
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Generate code
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Build Windows release
+        run: |
+          flutter build windows --release `
+            --obfuscate `
+            --split-debug-info=build/debug-info/windows/
+
+      # ── Package portable zip ──
+      - name: Package portable ZIP
+        shell: pwsh
+        run: |
+          $src = "build\windows\x64\runner\Release"
+          $dst = "PDFEditor-Windows-Portable"
+          New-Item -ItemType Directory -Path $dst -Force
+          Copy-Item -Recurse "$src\*" "$dst\"
+          Compress-Archive -Path $dst -DestinationPath "PDFEditor-Portable-${{ github.ref_name }}.zip"
+
+      # ── NSIS installer (tags only) ──
+      - name: Install NSIS
+        if: startsWith(github.ref, 'refs/tags/')
+        run: choco install nsis -y --no-progress
+
+      - name: Write NSIS script
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          @"
+          !define APP_NAME "PDF Editor"
+          !define APP_VERSION "$version"
+          !define APP_PUBLISHER "PDF Editor"
+          !define APP_URL "https://github.com/${{ github.repository }}"
+          !define APP_EXE "pdf_editor.exe"
+          !define BUILD_DIR "build\windows\x64\runner\Release"
+          !define INST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\PDFEditor"
+
+          Unicode True
+          Name "`${APP_NAME} `${APP_VERSION}"
+          OutFile "PDFEditor-Setup-`${APP_VERSION}.exe"
+          InstallDir "`$PROGRAMFILES64\`${APP_NAME}"
+          InstallDirRegKey HKCU "`${INST_KEY}" "InstallLocation"
+          RequestExecutionLevel admin
+          SetCompressor /SOLID lzma
+
+          !include "MUI2.nsh"
+          !insertmacro MUI_PAGE_WELCOME
+          !insertmacro MUI_PAGE_DIRECTORY
+          !insertmacro MUI_PAGE_INSTFILES
+          !insertmacro MUI_PAGE_FINISH
+          !insertmacro MUI_UNPAGE_CONFIRM
+          !insertmacro MUI_UNPAGE_INSTFILES
+          !insertmacro MUI_LANGUAGE "English"
+
+          Section "PDF Editor" SecMain
+            SetOutPath "`$INSTDIR"
+            File /r "`${BUILD_DIR}\*.*"
+
+            ; Start menu
+            CreateDirectory "`$SMPROGRAMS\`${APP_NAME}"
+            CreateShortcut "`$SMPROGRAMS\`${APP_NAME}\`${APP_NAME}.lnk" "`$INSTDIR\`${APP_EXE}"
+            CreateShortcut "`$SMPROGRAMS\`${APP_NAME}\Uninstall.lnk" "`$INSTDIR\Uninstall.exe"
+            CreateShortcut "`$DESKTOP\`${APP_NAME}.lnk" "`$INSTDIR\`${APP_EXE}"
+
+            ; Registry uninstall info
+            WriteRegStr HKCU "`${INST_KEY}" "DisplayName" "`${APP_NAME}"
+            WriteRegStr HKCU "`${INST_KEY}" "DisplayVersion" "`${APP_VERSION}"
+            WriteRegStr HKCU "`${INST_KEY}" "Publisher" "`${APP_PUBLISHER}"
+            WriteRegStr HKCU "`${INST_KEY}" "URLInfoAbout" "`${APP_URL}"
+            WriteRegStr HKCU "`${INST_KEY}" "InstallLocation" "`$INSTDIR"
+            WriteRegStr HKCU "`${INST_KEY}" "UninstallString" "`$INSTDIR\Uninstall.exe"
+            WriteRegDWORD HKCU "`${INST_KEY}" "NoModify" 1
+            WriteRegDWORD HKCU "`${INST_KEY}" "NoRepair" 1
+
+            WriteUninstaller "`$INSTDIR\Uninstall.exe"
+          SectionEnd
+
+          Section "Uninstall"
+            Delete "`$INSTDIR\Uninstall.exe"
+            RMDir /r "`$INSTDIR"
+            Delete "`$DESKTOP\`${APP_NAME}.lnk"
+            RMDir /r "`$SMPROGRAMS\`${APP_NAME}"
+            DeleteRegKey HKCU "`${INST_KEY}"
+          SectionEnd
+          "@ | Out-File -FilePath installer.nsi -Encoding UTF8
+
+      - name: Build installer
+        if: startsWith(github.ref, 'refs/tags/')
+        run: makensis installer.nsi
+
+      # ── Upload artifacts ──
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable-${{ github.sha }}
+          path: PDFEditor-Portable-*.zip
+          retention-days: 14
+
+      - name: Upload installer
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-${{ github.sha }}
+          path: PDFEditor-Setup-*.exe
+          retention-days: 30
+
+  # ── GitHub Release ────────────────────────────────────────────────────────
+  release:
+    name: 🚀 Publish Release
+    runs-on: ubuntu-latest
+    needs: [build-android, build-windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: List artifacts
+        run: find dist/ -type f | sort
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "PDF Editor ${{ github.ref_name }}"
+          body: |
+            ## 📱 PDF Editor ${{ github.ref_name }}
+
+            A full-featured PDF editor for Android & Windows — annotate, draw,
+            highlight, add text, and save directly to PDF.
+
+            ### 📦 Downloads
+
+            | Platform | File | Notes |
+            |----------|------|-------|
+            | 🤖 Android ARM64 | `app-arm64-v8a-release.apk` | Most modern Android phones |
+            | 🤖 Android ARM32 | `app-armeabi-v7a-release.apk` | Older Android phones |
+            | 🤖 Android x86_64 | `app-x86_64-release.apk` | Android emulators |
+            | 🤖 Android Bundle | `app-release.aab` | Google Play Store upload |
+            | 🪟 Windows Installer | `PDFEditor-Setup-*.exe` | Recommended — installs to Programs |
+            | 🪟 Windows Portable | `PDFEditor-Portable-*.zip` | Unzip & run — no install needed |
+
+            ### ✨ Features
+            - 📝 Add text annotations anywhere on any page
+            - 🖍 Highlight, underline, strikethrough text selections
+            - ✏️ Freehand drawing with color & stroke width control
+            - 🔲 Rectangle & circle shapes
+            - 🗑 Eraser tool
+            - 🔍 Zoom in/out
+            - 📄 Page thumbnail panel
+            - 💾 Save annotated PDF to device
+            - 📤 Share directly from the app
+            - 🌙 Light & Dark mode support
+
+            ### 🔧 Requirements
+            - **Android**: 6.0+ (API 23)
+            - **Windows**: Windows 10 64-bit or newer
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            dist/**/*.apk
+            dist/**/*.aab
+            dist/**/*.exe
+            dist/**/*.zip
