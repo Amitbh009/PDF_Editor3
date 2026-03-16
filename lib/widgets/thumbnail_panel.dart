@@ -1,11 +1,6 @@
 import 'package:flutter/material.dart';
 
 class ThumbnailPanel extends StatelessWidget {
-  final String filePath;
-  final int totalPages;
-  final int currentPage;
-  final ValueChanged<int> onPageTap;
-
   const ThumbnailPanel({
     super.key,
     required this.filePath,
@@ -13,6 +8,11 @@ class ThumbnailPanel extends StatelessWidget {
     required this.currentPage,
     required this.onPageTap,
   });
+
+  final String filePath;
+  final int totalPages;
+  final int currentPage;
+  final ValueChanged<int> onPageTap;
 
   @override
   Widget build(BuildContext context) {
@@ -24,7 +24,7 @@ class ThumbnailPanel extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Container(
+          Padding(
             padding: const EdgeInsets.all(8),
             child: Text(
               'Pages',
@@ -36,7 +36,7 @@ class ThumbnailPanel extends StatelessWidget {
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(vertical: 4),
               itemCount: totalPages,
-              itemBuilder: (context, index) {
+              itemBuilder: (_, index) {
                 final pageNum = index + 1;
                 final isSelected = pageNum == currentPage;
                 return GestureDetector(
@@ -58,7 +58,6 @@ class ThumbnailPanel extends StatelessWidget {
                     ),
                     child: Column(
                       children: [
-                        // Placeholder thumbnail
                         AspectRatio(
                           aspectRatio: 0.7,
                           child: Container(
@@ -68,7 +67,8 @@ class ThumbnailPanel extends StatelessWidget {
                               borderRadius: BorderRadius.circular(3),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.1),
+                                  color: Colors.black
+                                      .withValues(alpha: 0.1),
                                   blurRadius: 2,
                                   spreadRadius: 1,
                                 ),

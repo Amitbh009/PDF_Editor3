@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../providers/pdf_provider.dart';
 
 class PropertiesPanel extends ConsumerWidget {
@@ -7,10 +9,12 @@ class PropertiesPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final strokeWidth = ref.watch(strokeWidthProvider);
-    final fontSize = ref.watch(fontSizeProvider);
-    final color = ref.watch(selectedColorProvider);
+    final theme         = Theme.of(context);
+    final strokeWidth   = ref.watch(strokeWidthProvider);
+    final fontSize      = ref.watch(fontSizeProvider);
+    final opacity       = ref.watch(opacityProvider);
+    final selectedColor = ref.watch(selectedColorProvider);
+    final doc           = ref.watch(currentDocumentProvider);
 
     return Container(
       decoration: BoxDecoration(
@@ -19,160 +23,149 @@ class PropertiesPanel extends ConsumerWidget {
       ),
       child: Column(
         children: [
+          // ── Header ─────────────────────────────────────────────────────
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainer,
+              color: theme.colorScheme.surfaceContainerHighest,
               border:
                   Border(bottom: BorderSide(color: theme.dividerColor)),
             ),
             child: Row(
               children: [
-                Text('Properties',
-                    style: theme.textTheme.titleSmall
-                        ?.copyWith(fontWeight: FontWeight.bold)),
-                const Spacer(),
-                Icon(Icons.tune_rounded,
-                    size: 18,
-                    color: theme.colorScheme.onSurfaceVariant),
+                const Icon(Icons.tune_rounded, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  'Properties',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
               ],
             ),
           ),
+
+          // ── Controls ────────────────────────────────────────────────────
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                _Section(
-                  label: 'Stroke Width',
-                  child: Column(
-                    children: [
-                      Slider(
+                // Color
+                _Label(text: 'Color'),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: () =>
+                      _showColorPicker(context, ref, selectedColor),
+                  child: Container(
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: Color(selectedColor),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: theme.dividerColor),
+                    ),
+                    child: Center(
+                      child: Text(
+                        '#${selectedColor.toRadixString(16).padLeft(8, '0').toUpperCase().substring(2)}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          shadows: [
+                            Shadow(blurRadius: 4, color: Colors.black54),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Stroke width
+                _Label(text: 'Stroke Width'),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Slider(
                         value: strokeWidth,
                         min: 1,
                         max: 20,
                         divisions: 19,
-                        label: '${strokeWidth.round()}px',
-                        onChanged: (v) =>
-                            ref.read(strokeWidthProvider.notifier).state = v,
+                        onChanged: (v) => ref
+                            .read(strokeWidthProvider.notifier)
+                            .state = v,
                       ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('1px',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant)),
-                          Text('${strokeWidth.round()}px',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.primary,
-                                  fontWeight: FontWeight.bold)),
-                          Text('20px',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant)),
-                        ],
-                      ),
-                    ],
-                  ),
+                    ),
+                    SizedBox(
+                      width: 36,
+                      child: Text('${strokeWidth.round()}',
+                          style: theme.textTheme.labelMedium,
+                          textAlign: TextAlign.right),
+                    ),
+                  ],
                 ),
-                _Section(
-                  label: 'Font Size',
-                  child: Column(
-                    children: [
-                      Slider(
+
+                const SizedBox(height: 12),
+
+                // Font size
+                _Label(text: 'Font Size'),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Slider(
                         value: fontSize,
                         min: 8,
-                        max: 96,
-                        divisions: 44,
-                        label: '${fontSize.round()}pt',
+                        max: 72,
+                        divisions: 32,
                         onChanged: (v) =>
                             ref.read(fontSizeProvider.notifier).state = v,
                       ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('8pt',
-                              style: theme.textTheme.bodySmall),
-                          Text('${fontSize.round()}pt',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.primary,
-                                  fontWeight: FontWeight.bold)),
-                          Text('96pt',
-                              style: theme.textTheme.bodySmall),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                _Section(
-                  label: 'Text Style',
-                  child: Row(
-                    children: [
-                      Consumer(builder: (_, ref, __) {
-                        final isBold = ref.watch(isBoldProvider);
-                        return _StyleChip(
-                          label: 'B',
-                          active: isBold,
-                          bold: true,
-                          onTap: () => ref
-                              .read(isBoldProvider.notifier)
-                              .state = !isBold,
-                        );
-                      }),
-                      const SizedBox(width: 8),
-                      Consumer(builder: (_, ref, __) {
-                        final isItalic = ref.watch(isItalicProvider);
-                        return _StyleChip(
-                          label: 'I',
-                          active: isItalic,
-                          italic: true,
-                          onTap: () => ref
-                              .read(isItalicProvider.notifier)
-                              .state = !isItalic,
-                        );
-                      }),
-                    ],
-                  ),
-                ),
-                _Section(
-                  label: 'Current Color',
-                  child: Container(
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Color(color),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: theme.dividerColor),
                     ),
-                  ),
+                    SizedBox(
+                      width: 36,
+                      child: Text('${fontSize.round()}',
+                          style: theme.textTheme.labelMedium,
+                          textAlign: TextAlign.right),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 16),
-                _Section(
-                  label: 'Quick Colors',
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      0xFFFF0000, 0xFF00AA00, 0xFF0000FF,
-                      0xFFFFAA00, 0xFF9C27B0, 0xFF000000,
-                      0xFFFFFFFF, 0xFF607D8B,
-                    ].map((c) => GestureDetector(
-                      onTap: () =>
-                          ref.read(selectedColorProvider.notifier).state = c,
-                      child: Container(
-                        width: 32,
-                        height: 32,
-                        decoration: BoxDecoration(
-                          color: Color(c),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: color == c
-                                ? theme.colorScheme.primary
-                                : theme.dividerColor,
-                            width: color == c ? 3 : 1,
-                          ),
-                        ),
+
+                const SizedBox(height: 12),
+
+                // Opacity
+                _Label(text: 'Opacity'),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Slider(
+                        value: opacity,
+                        min: 0.1,
+                        max: 1.0,
+                        divisions: 18,
+                        onChanged: (v) =>
+                            ref.read(opacityProvider.notifier).state = v,
                       ),
-                    )).toList(),
-                  ),
+                    ),
+                    SizedBox(
+                      width: 44,
+                      child: Text('${(opacity * 100).round()}%',
+                          style: theme.textTheme.labelMedium,
+                          textAlign: TextAlign.right),
+                    ),
+                  ],
                 ),
+
+                const Divider(height: 32),
+
+                // Document info
+                if (doc != null) ...[
+                  _Label(text: 'Document Info'),
+                  const SizedBox(height: 8),
+                  _InfoRow(label: 'File',        value: doc.fileName),
+                  _InfoRow(label: 'Pages',       value: '${doc.totalPages}'),
+                  _InfoRow(label: 'Annotations', value: '${doc.annotations.length}'),
+                  _InfoRow(label: 'Current',     value: 'Page ${doc.currentPage}'),
+                  _InfoRow(label: 'Modified',    value: doc.isModified ? 'Yes' : 'No'),
+                ],
               ],
             ),
           ),
@@ -180,80 +173,88 @@ class PropertiesPanel extends ConsumerWidget {
       ),
     );
   }
-}
 
-class _Section extends StatelessWidget {
-  final String label;
-  final Widget child;
-  const _Section({required this.label, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label,
-              style: theme.textTheme.labelMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          child,
+  void _showColorPicker(
+      BuildContext ctx, WidgetRef ref, int currentColor) {
+    Color picked = Color(currentColor);
+    showDialog<void>(
+      context: ctx,
+      builder: (_) => AlertDialog(
+        title: const Text('Pick a color'),
+        content: SizedBox(
+          width: 300,
+          child: ColorPicker(
+            pickerColor: picked,
+            onColorChanged: (c) => picked = c,
+            pickerAreaHeightPercent: 0.7,
+            enableAlpha: true,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              ref.read(selectedColorProvider.notifier).state =
+                  picked.toARGB32();
+              Navigator.pop(ctx);
+            },
+            child: const Text('Select'),
+          ),
         ],
       ),
     );
   }
 }
 
-class _StyleChip extends StatelessWidget {
-  final String label;
-  final bool active;
-  final bool bold;
-  final bool italic;
-  final VoidCallback onTap;
+class _Label extends StatelessWidget {
+  const _Label({required this.text});
 
-  const _StyleChip({
-    required this.label,
-    required this.active,
-    this.bold = false,
-    this.italic = false,
-    required this.onTap,
-  });
+  final String text;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          color: active
-              ? theme.colorScheme.primaryContainer
-              : theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: active
-                ? theme.colorScheme.primary
-                : theme.dividerColor,
-          ),
+  Widget build(BuildContext context) => Text(
+        text,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+      );
+}
+
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          children: [
+            Text(
+              '$label:',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                value,
+                style: Theme.of(context)
+                    .textTheme
+                    .labelSmall
+                    ?.copyWith(fontWeight: FontWeight.w600),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
         ),
-        alignment: Alignment.center,
-        child: Text(
-          label,
-          style: TextStyle(
-            fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-            fontStyle: italic ? FontStyle.italic : FontStyle.normal,
-            color: active
-                ? theme.colorScheme.primary
-                : theme.colorScheme.onSurface,
-          ),
-        ),
-      ),
-    );
-  }
+      );
 }

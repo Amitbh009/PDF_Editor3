@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../providers/pdf_provider.dart';
+
 import '../models/annotation_model.dart';
+import '../providers/pdf_provider.dart';
 
 class AnnotationsList extends ConsumerWidget {
   const AnnotationsList({super.key});
@@ -24,18 +25,22 @@ class AnnotationsList extends ConsumerWidget {
       ),
       child: Column(
         children: [
+          // ── Header ─────────────────────────────────────────────────────
           Container(
             padding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               color: theme.colorScheme.surfaceContainer,
-              border: Border(bottom: BorderSide(color: theme.dividerColor)),
+              border:
+                  Border(bottom: BorderSide(color: theme.dividerColor)),
             ),
             child: Row(
               children: [
-                Text('Annotations',
-                    style: theme.textTheme.titleSmall
-                        ?.copyWith(fontWeight: FontWeight.bold)),
+                Text(
+                  'Annotations',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -47,15 +52,16 @@ class AnnotationsList extends ConsumerWidget {
                   child: Text(
                     '${annotations.length}',
                     style: TextStyle(
-                        fontSize: 11,
-                        color: theme.colorScheme.onPrimaryContainer,
-                        fontWeight: FontWeight.bold),
+                      fontSize: 11,
+                      color: theme.colorScheme.onPrimaryContainer,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
                 const Spacer(),
                 if (annotations.isNotEmpty)
                   TextButton(
-                    onPressed: () => showDialog(
+                    onPressed: () => showDialog<void>(
                       context: context,
                       builder: (_) => AlertDialog(
                         title: const Text('Clear All'),
@@ -63,8 +69,9 @@ class AnnotationsList extends ConsumerWidget {
                             'Remove all annotations on this page?'),
                         actions: [
                           TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text('Cancel')),
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('Cancel'),
+                          ),
                           FilledButton(
                             onPressed: () {
                               ref
@@ -83,31 +90,38 @@ class AnnotationsList extends ConsumerWidget {
               ],
             ),
           ),
+
+          // ── List ────────────────────────────────────────────────────────
           Expanded(
             child: annotations.isEmpty
                 ? Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.layers_clear_rounded,
-                            size: 40,
-                            color: theme.colorScheme.onSurfaceVariant
-                                .withOpacity(0.4)),
+                        Icon(
+                          Icons.layers_clear_rounded,
+                          size: 40,
+                          color: theme.colorScheme.onSurfaceVariant
+                              .withValues(alpha: 0.4),
+                        ),
                         const SizedBox(height: 8),
-                        Text('No annotations',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant)),
+                        Text(
+                          'No annotations',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color:
+                                theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
                       ],
                     ),
                   )
                 : ListView.separated(
                     padding: const EdgeInsets.all(8),
                     itemCount: annotations.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 4),
-                    itemBuilder: (_, i) {
-                      final a = annotations[i];
-                      return _AnnotationTile(annotation: a);
-                    },
+                    separatorBuilder: (_, __) =>
+                        const SizedBox(height: 4),
+                    itemBuilder: (_, i) =>
+                        _AnnotationTile(annotation: annotations[i]),
                   ),
           ),
         ],
@@ -117,8 +131,9 @@ class AnnotationsList extends ConsumerWidget {
 }
 
 class _AnnotationTile extends ConsumerWidget {
-  final AnnotationModel annotation;
   const _AnnotationTile({required this.annotation});
+
+  final AnnotationModel annotation;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -135,7 +150,7 @@ class _AnnotationTile extends ConsumerWidget {
           width: 28,
           height: 28,
           decoration: BoxDecoration(
-            color: Color(annotation.color).withOpacity(0.2),
+            color: Color(annotation.color).withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Icon(
@@ -170,30 +185,18 @@ class _AnnotationTile extends ConsumerWidget {
     );
   }
 
-  IconData _iconForType(AnnotationType t) {
-    switch (t) {
-      case AnnotationType.text:
-        return Icons.text_fields_rounded;
-      case AnnotationType.highlight:
-        return Icons.highlight_rounded;
-      case AnnotationType.underline:
-        return Icons.format_underline_rounded;
-      case AnnotationType.strikethrough:
-        return Icons.strikethrough_s_rounded;
-      case AnnotationType.freehand:
-        return Icons.draw_rounded;
-      case AnnotationType.rectangle:
-        return Icons.crop_square_rounded;
-      case AnnotationType.circle:
-        return Icons.circle_outlined;
-      case AnnotationType.arrow:
-        return Icons.arrow_right_alt_rounded;
-      default:
-        return Icons.layers_rounded;
-    }
-  }
+  IconData _iconForType(AnnotationType t) => switch (t) {
+        AnnotationType.text => Icons.text_fields_rounded,
+        AnnotationType.highlight => Icons.highlight_rounded,
+        AnnotationType.underline => Icons.format_underline_rounded,
+        AnnotationType.strikethrough => Icons.strikethrough_s_rounded,
+        AnnotationType.freehand => Icons.draw_rounded,
+        AnnotationType.rectangle => Icons.crop_square_rounded,
+        AnnotationType.circle => Icons.circle_outlined,
+        AnnotationType.arrow => Icons.arrow_right_alt_rounded,
+        _ => Icons.layers_rounded,
+      };
 
-  String _labelForType(AnnotationType t) {
-    return t.name[0].toUpperCase() + t.name.substring(1);
-  }
+  String _labelForType(AnnotationType t) =>
+      t.name[0].toUpperCase() + t.name.substring(1);
 }

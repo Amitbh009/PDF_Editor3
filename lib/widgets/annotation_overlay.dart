@@ -2,14 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:uuid/uuid.dart';
-import '../providers/pdf_provider.dart';
+
 import '../models/annotation_model.dart';
+import '../providers/pdf_provider.dart';
 
 const _uuid = Uuid();
 
 class AnnotationOverlay extends ConsumerStatefulWidget {
-  final PdfViewerController pdfController;
   const AnnotationOverlay({super.key, required this.pdfController});
+
+  final PdfViewerController pdfController;
 
   @override
   ConsumerState<AnnotationOverlay> createState() =>
@@ -18,7 +20,7 @@ class AnnotationOverlay extends ConsumerStatefulWidget {
 
 class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
   Offset? _drawStart;
-  Offset? _lastDrag;
+  Offset? _drawCurrent;
   List<Offset> _freehandPoints = [];
   bool _isDrawing = false;
 
@@ -27,7 +29,7 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
     if (tool == EditorTool.select) return;
     setState(() {
       _drawStart = d.localPosition;
-      _lastDrag = d.localPosition;
+      _drawCurrent = d.localPosition;
       _isDrawing = true;
       if (tool == EditorTool.freehand) {
         _freehandPoints = [d.localPosition];
@@ -37,107 +39,132 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
 
   void _onPanUpdate(DragUpdateDetails d) {
     if (!_isDrawing) return;
-    final tool = ref.read(selectedToolProvider);
     setState(() {
-      _lastDrag = d.localPosition;
-      if (tool == EditorTool.freehand) {
+      _drawCurrent = d.localPosition;
+      if (ref.read(selectedToolProvider) == EditorTool.freehand) {
         _freehandPoints.add(d.localPosition);
       }
     });
   }
 
   void _onPanEnd(DragEndDetails _) {
-    if (!_isDrawing || _drawStart == null) return;
+    if (!_isDrawing || _drawStart == null) {
+      _reset();
+      return;
+    }
     final tool = ref.read(selectedToolProvider);
     final doc = ref.read(currentDocumentProvider);
     if (doc == null) {
-      setState(() {
-        _drawStart = null;
-        _lastDrag = null;
-        _isDrawing = false;
-        _freehandPoints = [];
-      });
+      _reset();
       return;
     }
 
     final color = ref.read(selectedColorProvider);
-    final stroke = ref.read(strokeWidthProvider);
+    final strokeWidth = ref.read(strokeWidthProvider);
     final page = doc.currentPage;
     AnnotationModel? annotation;
 
-    if (tool == EditorTool.freehand && _freehandPoints.length > 1) {
-      final xs = _freehandPoints.map((p) => p.dx);
-      final ys = _freehandPoints.map((p) => p.dy);
-      annotation = AnnotationModel(
-        id: _uuid.v4(),
-        type: AnnotationType.freehand,
-        pageNumber: page,
-        x: xs.reduce((a, b) => a < b ? a : b),
-        y: ys.reduce((a, b) => a < b ? a : b),
-        width: xs.reduce((a, b) => a > b ? a : b) -
-            xs.reduce((a, b) => a < b ? a : b),
-        height: ys.reduce((a, b) => a > b ? a : b) -
-            ys.reduce((a, b) => a < b ? a : b),
-        color: color,
-        strokeWidth: stroke,
-        pathPoints: _freehandPoints
-            .map((p) => {'x': p.dx, 'y': p.dy})
-            .toList(),
-        createdAt: DateTime.now(),
-      );
-    } else if ((tool == EditorTool.rectangle || tool == EditorTool.circle) &&
-        _lastDrag != null) {
-      final rect = Rect.fromPoints(_drawStart!, _lastDrag!);
-      if (rect.width > 4 && rect.height > 4) {
-        annotation = AnnotationModel(
-          id: _uuid.v4(),
-          type: tool == EditorTool.rectangle
-              ? AnnotationType.rectangle
-              : AnnotationType.circle,
-          pageNumber: page,
-          x: rect.left,
-          y: rect.top,
-          width: rect.width,
-          height: rect.height,
-          color: color,
-          strokeWidth: stroke,
-          createdAt: DateTime.now(),
-        );
-      }
-    } else if ((tool == EditorTool.highlight ||
-            tool == EditorTool.underline ||
-            tool == EditorTool.strikethrough) &&
-        _lastDrag != null) {
-      final rect = Rect.fromPoints(_drawStart!, _lastDrag!);
-      annotation = AnnotationModel(
-        id: _uuid.v4(),
-        type: tool == EditorTool.highlight
-            ? AnnotationType.highlight
-            : tool == EditorTool.underline
-                ? AnnotationType.underline
-                : AnnotationType.strikethrough,
-        pageNumber: page,
-        x: rect.left,
-        y: rect.top,
-        width: rect.width,
-        height: rect.height,
-        color: color,
-        opacity: 0.4,
-        strokeWidth: stroke,
-        createdAt: DateTime.now(),
-      );
+    switch (tool) {
+      case EditorTool.freehand:
+        if (_freehandPoints.length > 1) {
+          final xs = _freehandPoints.map((p) => p.dx);
+          final ys = _freehandPoints.map((p) => p.dy);
+          final minX = xs.reduce((a, b) => a < b ? a : b);
+          final minY = ys.reduce((a, b) => a < b ? a : b);
+          final maxX = xs.reduce((a, b) => a > b ? a : b);
+          final maxY = ys.reduce((a, b) => a > b ? a : b);
+          annotation = AnnotationModel(
+            id: _uuid.v4(),
+            type: AnnotationType.freehand,
+            pageNumber: page,
+            x: minX,
+            y: minY,
+            width: (maxX - minX).clamp(1, double.infinity),
+            height: (maxY - minY).clamp(1, double.infinity),
+            color: color,
+            strokeWidth: strokeWidth,
+            pathPoints: _freehandPoints
+                .map((p) => {'x': p.dx, 'y': p.dy})
+                .toList(),
+            createdAt: DateTime.now(),
+          );
+        }
+      case EditorTool.rectangle:
+      case EditorTool.circle:
+        if (_drawCurrent != null) {
+          final r = Rect.fromPoints(_drawStart!, _drawCurrent!);
+          if (r.width > 4 && r.height > 4) {
+            annotation = AnnotationModel(
+              id: _uuid.v4(),
+              type: tool == EditorTool.rectangle
+                  ? AnnotationType.rectangle
+                  : AnnotationType.circle,
+              pageNumber: page,
+              x: r.left,
+              y: r.top,
+              width: r.width,
+              height: r.height,
+              color: color,
+              strokeWidth: strokeWidth,
+              createdAt: DateTime.now(),
+            );
+          }
+        }
+      case EditorTool.highlight:
+      case EditorTool.underline:
+      case EditorTool.strikethrough:
+        if (_drawCurrent != null) {
+          final r = Rect.fromPoints(_drawStart!, _drawCurrent!);
+          if (r.width > 4) {
+            final typeMap = {
+              EditorTool.highlight: AnnotationType.highlight,
+              EditorTool.underline: AnnotationType.underline,
+              EditorTool.strikethrough: AnnotationType.strikethrough,
+            };
+            annotation = AnnotationModel(
+              id: _uuid.v4(),
+              type: typeMap[tool]!,
+              pageNumber: page,
+              x: r.left,
+              y: r.top,
+              width: r.width,
+              height: r.height.clamp(10, double.infinity),
+              color: color,
+              strokeWidth: strokeWidth,
+              opacity: tool == EditorTool.highlight ? 0.4 : 1.0,
+              createdAt: DateTime.now(),
+            );
+          }
+        }
+      default:
+        break;
     }
 
     if (annotation != null) {
       ref.read(currentDocumentProvider.notifier).addAnnotation(annotation);
     }
+    _reset();
+  }
 
+  void _reset() {
     setState(() {
       _drawStart = null;
-      _lastDrag = null;
+      _drawCurrent = null;
       _isDrawing = false;
       _freehandPoints = [];
     });
+  }
+
+  void _onTapForText(TapUpDetails details) {
+    final doc = ref.read(currentDocumentProvider);
+    if (doc == null) return;
+    showDialog<void>(
+      context: context,
+      builder: (_) => _TextInputDialog(
+        position: details.localPosition,
+        page: doc.currentPage,
+      ),
+    );
   }
 
   @override
@@ -146,73 +173,59 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
     final doc = ref.watch(currentDocumentProvider);
     if (doc == null) return const SizedBox.shrink();
 
-    final pageAnnotations = doc.annotations
+    final cursor = switch (tool) {
+      EditorTool.select => SystemMouseCursors.basic,
+      EditorTool.text => SystemMouseCursors.text,
+      EditorTool.eraser => SystemMouseCursors.precise,
+      _ => SystemMouseCursors.precise,
+    };
+
+    final annotations = doc.annotations
         .where((a) => a.pageNumber == doc.currentPage)
         .toList();
-
-    final cursor = _cursorForTool(tool);
 
     return MouseRegion(
       cursor: cursor,
       child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onPanStart: tool != EditorTool.select ? _onPanStart : null,
-        onPanUpdate: tool != EditorTool.select ? _onPanUpdate : null,
-        onPanEnd: tool != EditorTool.select ? _onPanEnd : null,
+        onPanStart: _onPanStart,
+        onPanUpdate: _onPanUpdate,
+        onPanEnd: _onPanEnd,
         onTapUp: tool == EditorTool.text ? _onTapForText : null,
         child: CustomPaint(
-          painter: AnnotationPainter(
-            annotations: pageAnnotations,
+          painter: _AnnotationPainter(
+            annotations: annotations,
             freehandPoints: _freehandPoints,
             drawStart: _drawStart,
-            lastDrag: _lastDrag,
+            drawCurrent: _drawCurrent,
             currentTool: tool,
             currentColor: Color(ref.watch(selectedColorProvider)),
             strokeWidth: ref.watch(strokeWidthProvider),
+            opacity: ref.watch(opacityProvider),
           ),
           child: Container(color: Colors.transparent),
         ),
       ),
     );
   }
-
-  MouseCursor _cursorForTool(EditorTool tool) {
-    switch (tool) {
-      case EditorTool.text:
-        return SystemMouseCursors.text;
-      case EditorTool.eraser:
-        return SystemMouseCursors.precise;
-      case EditorTool.select:
-        return SystemMouseCursors.basic;
-      default:
-        return SystemMouseCursors.precise;
-    }
-  }
-
-  void _onTapForText(TapUpDetails details) {
-    final doc = ref.read(currentDocumentProvider);
-    if (doc == null) return;
-    showDialog(
-      context: context,
-      builder: (_) => _TextInputDialog(
-        position: details.localPosition,
-        page: doc.currentPage,
-      ),
-    );
-  }
 }
 
+// ── Text input dialog ─────────────────────────────────────────────────────────
+
 class _TextInputDialog extends ConsumerStatefulWidget {
-  final Offset position;
-  final int page;
   const _TextInputDialog({required this.position, required this.page});
 
+  final Offset position;
+  final int page;
+
   @override
-  ConsumerState<_TextInputDialog> createState() => _TextInputDialogState();
+  ConsumerState<_TextInputDialog> createState() =>
+      _TextInputDialogState();
 }
 
 class _TextInputDialogState extends ConsumerState<_TextInputDialog> {
   final _ctrl = TextEditingController();
+  bool _bold = false;
+  bool _italic = false;
 
   @override
   void dispose() {
@@ -222,18 +235,47 @@ class _TextInputDialogState extends ConsumerState<_TextInputDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final fontSize = ref.watch(fontSizeProvider);
     return AlertDialog(
-      title: const Text('Add Text'),
+      title: const Text('Add Text Annotation'),
       content: SizedBox(
-        width: 300,
-        child: TextField(
-          controller: _ctrl,
-          autofocus: true,
-          maxLines: 5,
-          decoration: const InputDecoration(
-            hintText: 'Enter text...',
-            border: OutlineInputBorder(),
-          ),
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _ctrl,
+              autofocus: true,
+              maxLines: 5,
+              decoration: const InputDecoration(
+                hintText: 'Enter text here…',
+                border: OutlineInputBorder(),
+                filled: true,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                FilterChip(
+                  label: const Text('Bold'),
+                  selected: _bold,
+                  onSelected: (v) => setState(() => _bold = v),
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  label: const Text('Italic'),
+                  selected: _italic,
+                  onSelected: (v) => setState(() => _italic = v),
+                ),
+                const Spacer(),
+                Text(
+                  '${fontSize.round()}pt',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              ],
+            ),
+          ],
         ),
       ),
       actions: [
@@ -243,201 +285,182 @@ class _TextInputDialogState extends ConsumerState<_TextInputDialog> {
         ),
         FilledButton(
           onPressed: () {
-            if (_ctrl.text.isNotEmpty) {
-              final annotation = AnnotationModel(
-                id: const Uuid().v4(),
-                type: AnnotationType.text,
-                pageNumber: widget.page,
-                x: widget.position.dx,
-                y: widget.position.dy,
-                width: 200,
-                height: 40,
-                content: _ctrl.text,
-                color: ref.read(selectedColorProvider),
-                fontSize: ref.read(fontSizeProvider),
-                isBold: ref.read(isBoldProvider),
-                isItalic: ref.read(isItalicProvider),
-                createdAt: DateTime.now(),
-              );
-              ref
-                  .read(currentDocumentProvider.notifier)
-                  .addAnnotation(annotation);
+            if (_ctrl.text.trim().isNotEmpty) {
+              ref.read(currentDocumentProvider.notifier).addAnnotation(
+                    AnnotationModel(
+                      id: const Uuid().v4(),
+                      type: AnnotationType.text,
+                      pageNumber: widget.page,
+                      x: widget.position.dx,
+                      y: widget.position.dy,
+                      width: 240,
+                      height: 40,
+                      content: _ctrl.text.trim(),
+                      color: ref.read(selectedColorProvider),
+                      fontSize: ref.read(fontSizeProvider),
+                      isBold: _bold,
+                      isItalic: _italic,
+                      createdAt: DateTime.now(),
+                    ),
+                  );
             }
             Navigator.pop(context);
           },
-          child: const Text('Add'),
+          child: const Text('Add Text'),
         ),
       ],
     );
   }
 }
 
-class AnnotationPainter extends CustomPainter {
-  final List<AnnotationModel> annotations;
-  final List<Offset> freehandPoints;
-  final Offset? drawStart;
-  final Offset? lastDrag;
-  final EditorTool currentTool;
-  final Color currentColor;
-  final double strokeWidth;
+// ── Annotation painter ────────────────────────────────────────────────────────
 
-  AnnotationPainter({
+class _AnnotationPainter extends CustomPainter {
+  const _AnnotationPainter({
     required this.annotations,
     required this.freehandPoints,
     required this.drawStart,
-    required this.lastDrag,
+    required this.drawCurrent,
     required this.currentTool,
     required this.currentColor,
     required this.strokeWidth,
+    required this.opacity,
   });
+
+  final List<AnnotationModel> annotations;
+  final List<Offset> freehandPoints;
+  final Offset? drawStart;
+  final Offset? drawCurrent;
+  final EditorTool currentTool;
+  final Color currentColor;
+  final double strokeWidth;
+  final double opacity;
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Draw committed annotations
     for (final a in annotations) {
       _drawAnnotation(canvas, a);
     }
-    _drawLivePreview(canvas);
+
+    // Live preview
+    final previewPaint = Paint()
+      ..color = currentColor.withValues(alpha: 0.8)
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    if (drawStart != null && drawCurrent != null) {
+      final rect = Rect.fromPoints(drawStart!, drawCurrent!);
+      switch (currentTool) {
+        case EditorTool.rectangle:
+          canvas.drawRect(rect, previewPaint);
+        case EditorTool.circle:
+          canvas.drawOval(rect, previewPaint);
+        case EditorTool.highlight:
+          canvas.drawRect(
+            rect,
+            Paint()
+              ..color = currentColor.withValues(alpha: 0.3)
+              ..style = PaintingStyle.fill,
+          );
+        case EditorTool.underline:
+          canvas.drawLine(
+            Offset(rect.left, rect.bottom),
+            Offset(rect.right, rect.bottom),
+            previewPaint,
+          );
+        case EditorTool.strikethrough:
+          canvas.drawLine(
+            Offset(rect.left, rect.center.dy),
+            Offset(rect.right, rect.center.dy),
+            previewPaint,
+          );
+        default:
+          break;
+      }
+    }
+
+    // Live freehand
+    if (freehandPoints.length > 1) {
+      final path = Path()
+        ..moveTo(freehandPoints.first.dx, freehandPoints.first.dy);
+      for (final p in freehandPoints.skip(1)) {
+        path.lineTo(p.dx, p.dy);
+      }
+      canvas.drawPath(path, previewPaint);
+    }
   }
 
   void _drawAnnotation(Canvas canvas, AnnotationModel a) {
     final paint = Paint()
-      ..color = Color(a.color).withOpacity(a.opacity)
+      ..color = Color(a.color).withValues(alpha: a.opacity)
       ..strokeWidth = a.strokeWidth
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
 
-    final bounds = Rect.fromLTWH(a.x, a.y, a.width, a.height);
-
     switch (a.type) {
       case AnnotationType.freehand:
         if (a.pathPoints != null && a.pathPoints!.length > 1) {
-          final path = Path();
-          final pts = a.pathPoints!;
-          path.moveTo(pts.first['x']!, pts.first['y']!);
-          for (final p in pts.skip(1)) {
+          final path = Path()
+            ..moveTo(a.pathPoints!.first['x']!, a.pathPoints!.first['y']!);
+          for (final p in a.pathPoints!.skip(1)) {
             path.lineTo(p['x']!, p['y']!);
           }
           canvas.drawPath(path, paint);
         }
-        break;
-
       case AnnotationType.rectangle:
-        canvas.drawRect(bounds, paint);
-        break;
-
-      case AnnotationType.circle:
-        canvas.drawOval(bounds, paint);
-        break;
-
-      case AnnotationType.highlight:
         canvas.drawRect(
-          bounds,
-          Paint()
-            ..color = Color(a.color).withOpacity(0.3)
-            ..style = PaintingStyle.fill,
+          Rect.fromLTWH(a.x, a.y, a.width, a.height),
+          paint,
         );
-        break;
-
-      case AnnotationType.underline:
-        final linePaint = Paint()
-          ..color = Color(a.color)
-          ..strokeWidth = 2;
-        canvas.drawLine(
-          Offset(a.x, a.y + a.height),
-          Offset(a.x + a.width, a.y + a.height),
-          linePaint,
+      case AnnotationType.circle:
+        canvas.drawOval(
+          Rect.fromLTWH(a.x, a.y, a.width, a.height),
+          paint,
         );
-        break;
-
-      case AnnotationType.strikethrough:
-        final linePaint = Paint()
-          ..color = Color(a.color)
-          ..strokeWidth = 2;
-        final midY = a.y + a.height / 2;
-        canvas.drawLine(
-          Offset(a.x, midY),
-          Offset(a.x + a.width, midY),
-          linePaint,
-        );
-        break;
-
       case AnnotationType.text:
-        final tp = TextPainter(
+        TextPainter(
           text: TextSpan(
             text: a.content,
             style: TextStyle(
               color: Color(a.color),
               fontSize: a.fontSize,
-              fontWeight:
-                  a.isBold ? FontWeight.bold : FontWeight.normal,
+              fontWeight: a.isBold ? FontWeight.bold : FontWeight.normal,
               fontStyle:
                   a.isItalic ? FontStyle.italic : FontStyle.normal,
             ),
           ),
           textDirection: TextDirection.ltr,
-        )..layout(maxWidth: a.width);
-        tp.paint(canvas, Offset(a.x, a.y));
-
-        // Show selection border
+        )
+          ..layout(maxWidth: a.width)
+          ..paint(canvas, Offset(a.x, a.y));
+      case AnnotationType.highlight:
         canvas.drawRect(
-          bounds.inflate(2),
+          Rect.fromLTWH(a.x, a.y, a.width, a.height),
           Paint()
-            ..color = Colors.blue.withOpacity(0.3)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1,
+            ..color = Color(a.color).withValues(alpha: 0.35)
+            ..style = PaintingStyle.fill,
         );
-        break;
-
+      case AnnotationType.underline:
+        canvas.drawLine(
+          Offset(a.x, a.y + a.height),
+          Offset(a.x + a.width, a.y + a.height),
+          paint,
+        );
+      case AnnotationType.strikethrough:
+        canvas.drawLine(
+          Offset(a.x, a.y + a.height / 2),
+          Offset(a.x + a.width, a.y + a.height / 2),
+          paint,
+        );
       default:
         break;
     }
   }
 
-  void _drawLivePreview(Canvas canvas) {
-    if (drawStart == null) return;
-    final paint = Paint()
-      ..color = currentColor.withOpacity(0.7)
-      ..strokeWidth = strokeWidth
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    if (currentTool == EditorTool.freehand && freehandPoints.length > 1) {
-      final path = Path();
-      path.moveTo(freehandPoints.first.dx, freehandPoints.first.dy);
-      for (final p in freehandPoints.skip(1)) {
-        path.lineTo(p.dx, p.dy);
-      }
-      canvas.drawPath(path, paint);
-      return;
-    }
-
-    if (lastDrag == null) return;
-    final rect = Rect.fromPoints(drawStart!, lastDrag!);
-
-    if (currentTool == EditorTool.rectangle) {
-      canvas.drawRect(rect, paint);
-    } else if (currentTool == EditorTool.circle) {
-      canvas.drawOval(rect, paint);
-    } else if (currentTool == EditorTool.highlight) {
-      canvas.drawRect(
-        rect,
-        Paint()
-          ..color = currentColor.withOpacity(0.3)
-          ..style = PaintingStyle.fill,
-      );
-    } else if (currentTool == EditorTool.underline ||
-        currentTool == EditorTool.strikethrough) {
-      canvas.drawRect(
-        rect,
-        Paint()
-          ..color = currentColor.withOpacity(0.15)
-          ..style = PaintingStyle.fill,
-      );
-      canvas.drawRect(rect, paint..style = PaintingStyle.stroke);
-    }
-  }
-
   @override
-  bool shouldRepaint(AnnotationPainter old) => true;
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

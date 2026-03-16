@@ -1,33 +1,43 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:file_picker/file_picker.dart';
+
 import '../providers/pdf_provider.dart';
 import 'editor_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
-  Future<void> _openPdf(BuildContext context, WidgetRef ref) async {
+  // Deliberately returns void so the caller does not get an unawaited Future.
+  void _openPdf(BuildContext context, WidgetRef ref) {
+    _doOpen(context, ref);
+  }
+
+  Future<void> _doOpen(BuildContext context, WidgetRef ref) async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['pdf'],
     );
-    if (result != null && result.files.single.path != null) {
-      await ref
-          .read(currentDocumentProvider.notifier)
-          .openDocument(result.files.single.path!);
-      if (context.mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const EditorScreen()),
-        );
-      }
-    }
+
+    if (result == null || result.files.single.path == null) return;
+    if (!context.mounted) return;
+
+    await ref
+        .read(currentDocumentProvider.notifier)
+        .openDocument(result.files.single.path!);
+
+    if (!context.mounted) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const EditorScreen()),
+    );
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final size = MediaQuery.of(context).size;
+
     return Scaffold(
       backgroundColor: theme.colorScheme.surface,
       body: SafeArea(
@@ -36,94 +46,182 @@ class HomeScreen extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ── Header ──────────────────────────────────────────────────
               Row(
                 children: [
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: 52,
+                    height: 52,
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(12),
+                      gradient: LinearGradient(
+                        colors: [
+                          theme.colorScheme.primary,
+                          theme.colorScheme.secondary,
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    child: Icon(Icons.picture_as_pdf_rounded,
-                        color: theme.colorScheme.primary, size: 28),
+                    child: const Icon(
+                      Icons.picture_as_pdf_rounded,
+                      color: Colors.white,
+                      size: 30,
+                    ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 14),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('PDF Editor',
-                          style: theme.textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.bold)),
-                      Text('Edit, annotate & sign PDFs',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant)),
+                      Text(
+                        'PDF Editor',
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        'Edit, annotate & sign PDFs',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
                     ],
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.brightness_6_rounded),
-                    onPressed: () {},
-                    tooltip: 'Toggle theme',
                   ),
                 ],
               ),
-              const Spacer(),
-              Center(
+
+              const SizedBox(height: 32),
+
+              // ── Drop zone ────────────────────────────────────────────────
+              Expanded(
+                flex: 5,
                 child: GestureDetector(
                   onTap: () => _openPdf(context, ref),
                   child: Container(
                     width: double.infinity,
-                    height: 260,
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: theme.colorScheme.primary.withOpacity(0.4),
-                        width: 2,
+                        color: theme.colorScheme.primary
+                            .withValues(alpha: 0.5),
+                        width: 2.5,
                       ),
-                      borderRadius: BorderRadius.circular(20),
-                      color: theme.colorScheme.primaryContainer.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(24),
+                      gradient: LinearGradient(
+                        colors: [
+                          theme.colorScheme.primaryContainer
+                              .withValues(alpha: 0.4),
+                          theme.colorScheme.secondaryContainer
+                              .withValues(alpha: 0.2),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
                     ),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.upload_file_rounded,
-                            size: 72, color: theme.colorScheme.primary),
-                        const SizedBox(height: 16),
-                        Text('Open a PDF',
-                            style: theme.textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: theme.colorScheme.primary,
-                            )),
+                        Container(
+                          width: 96,
+                          height: 96,
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primaryContainer,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.upload_file_rounded,
+                            size: 52,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        Text(
+                          'Open a PDF to Edit',
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
                         const SizedBox(height: 8),
-                        Text('Tap to browse files',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant)),
+                        Text(
+                          'Tap anywhere to browse files',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Supported: .pdf',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant
+                                .withValues(alpha: 0.7),
+                          ),
+                        ),
                       ],
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 32),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: const [
-                  _FeatureChip(icon: Icons.text_fields, label: 'Add Text'),
-                  _FeatureChip(icon: Icons.highlight, label: 'Highlight'),
-                  _FeatureChip(icon: Icons.draw_rounded, label: 'Draw'),
-                  _FeatureChip(icon: Icons.crop_square, label: 'Shapes'),
-                  _FeatureChip(icon: Icons.save_alt_rounded, label: 'Export'),
-                  _FeatureChip(icon: Icons.format_underline, label: 'Underline'),
-                ],
+
+              const SizedBox(height: 24),
+
+              // ── Feature grid ─────────────────────────────────────────────
+              Expanded(
+                flex: 3,
+                child: GridView.count(
+                  crossAxisCount: size.width > 600 ? 6 : 3,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 1.1,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: const [
+                    _FeatureTile(
+                      icon: Icons.text_fields_rounded,
+                      label: 'Add Text',
+                      color: Color(0xFF6C63FF),
+                    ),
+                    _FeatureTile(
+                      icon: Icons.highlight_rounded,
+                      label: 'Highlight',
+                      color: Color(0xFFFFB300),
+                    ),
+                    _FeatureTile(
+                      icon: Icons.draw_rounded,
+                      label: 'Draw',
+                      color: Color(0xFF00B894),
+                    ),
+                    _FeatureTile(
+                      icon: Icons.crop_square_rounded,
+                      label: 'Shapes',
+                      color: Color(0xFFE17055),
+                    ),
+                    _FeatureTile(
+                      icon: Icons.delete_rounded,
+                      label: 'Erase',
+                      color: Color(0xFFD63031),
+                    ),
+                    _FeatureTile(
+                      icon: Icons.save_alt_rounded,
+                      label: 'Export',
+                      color: Color(0xFF0984E3),
+                    ),
+                  ],
+                ),
               ),
-              const Spacer(),
+
+              const SizedBox(height: 16),
+
+              // ── Open button ──────────────────────────────────────────────
               SizedBox(
                 width: double.infinity,
                 height: 56,
                 child: FilledButton.icon(
                   onPressed: () => _openPdf(context, ref),
                   icon: const Icon(Icons.folder_open_rounded),
-                  label: const Text('Browse Files'),
+                  label: const Text(
+                    'Browse & Open PDF',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
             ],
@@ -134,31 +232,39 @@ class HomeScreen extends ConsumerWidget {
   }
 }
 
-class _FeatureChip extends StatelessWidget {
+class _FeatureTile extends StatelessWidget {
   final IconData icon;
   final String label;
-  const _FeatureChip({required this.icon, required this.label});
+  final Color color;
+
+  const _FeatureTile({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: theme.colorScheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(20),
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 16, color: theme.colorScheme.onSecondaryContainer),
-          const SizedBox(width: 6),
-          Text(label,
-              style: TextStyle(
-                fontSize: 12,
-                color: theme.colorScheme.onSecondaryContainer,
-                fontWeight: FontWeight.w500,
-              )),
+          Icon(icon, color: color, size: 28),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
+            textAlign: TextAlign.center,
+          ),
         ],
       ),
     );
