@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pdf_editor/main.dart';
 import 'package:pdf_editor/providers/pdf_provider.dart';
+import 'package:pdf_editor/screens/home_screen.dart';
 
 void main() {
   group('DocumentNotifier', () {
@@ -30,5 +32,13 @@ void main() {
       addTearDown(container.dispose);
       expect(container.read(strokeWidthProvider), equals(2.0));
     });
+  });
+
+  testWidgets('app renders HomeScreen with call-to-action',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(const ProviderScope(child: PdfEditorApp()));
+
+    expect(find.byType(HomeScreen), findsOneWidget);
+    expect(find.text('Browse & Open PDF'), findsOneWidget);
   });
 }
