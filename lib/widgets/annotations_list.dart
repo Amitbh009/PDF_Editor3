@@ -97,7 +97,7 @@ class AnnotationsList extends ConsumerWidget {
                           size: 40,
                           color: theme.colorScheme.onSurfaceVariant
                               // ignore: deprecated_member_use
-                              .withOpacity(0.4),
+                              .withValues(alpha: 0.4),
                         ),
                         const SizedBox(height: 8),
                         Text(
@@ -145,7 +145,7 @@ class _AnnotationTile extends ConsumerWidget {
           height: 28,
           decoration: BoxDecoration(
             // ignore: deprecated_member_use
-            color: Color(annotation.color).withOpacity(0.2),
+            color: Color(annotation.color).withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Icon(

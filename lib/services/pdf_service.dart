@@ -1,6 +1,6 @@
 import 'dart:io';
-// Only import Offset from dart:ui — do NOT import Rect (conflicts with sf.Rect)
-import 'dart:ui' show Offset;
+// dart:ui provides both Rect and Offset used by Syncfusion graphics APIs
+import 'dart:ui' show Offset, Rect;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart' as sf;
@@ -10,11 +10,9 @@ import '../models/annotation_model.dart';
 final pdfServiceProvider = Provider<PdfService>((ref) => PdfService());
 
 class PdfService {
-  // ── Public API ──────────────────────────────────────────────────────────────
-
   Future<int> getPageCount(String filePath) async {
     final bytes = await File(filePath).readAsBytes();
-    final doc = sf.PdfDocument(inputBytes: bytes);
+    final doc   = sf.PdfDocument(inputBytes: bytes);
     final count = doc.pages.count;
     doc.dispose();
     return count;
@@ -26,7 +24,7 @@ class PdfService {
     String outputPath,
   ) async {
     final bytes = await File(sourcePath).readAsBytes();
-    final doc = sf.PdfDocument(inputBytes: bytes);
+    final doc   = sf.PdfDocument(inputBytes: bytes);
 
     for (final a in annotations) {
       if (a.pageNumber < 1 || a.pageNumber > doc.pages.count) continue;
@@ -77,9 +75,9 @@ class PdfService {
     );
   }
 
-  // sf.Rect is from syncfusion_flutter_pdf — no dart:ui conflict
-  sf.Rect _sfRect(AnnotationModel a) =>
-      sf.Rect.fromLTWH(a.x, a.y, a.width, a.height);
+  // dart:ui Rect — this is what ALL Syncfusion PDF APIs actually accept
+  Rect _rect(AnnotationModel a) =>
+      Rect.fromLTWH(a.x, a.y, a.width, a.height);
 
   // ── Writers ─────────────────────────────────────────────────────────────────
 
@@ -97,40 +95,37 @@ class PdfService {
     page.graphics.drawString(
       a.content,
       font,
-      brush: sf.PdfSolidBrush(_sfColor(a.color)),
-      bounds: _sfRect(a),
+      brush:  sf.PdfSolidBrush(_sfColor(a.color)),
+      bounds: _rect(a),
     );
   }
 
   void _addHighlight(sf.PdfPage page, AnnotationModel a) {
-    final annot = sf.PdfTextMarkupAnnotation(
-      _sfRect(a),
+    page.annotations.add(sf.PdfTextMarkupAnnotation(
+      _rect(a),
       a.content.isEmpty ? 'Highlight' : a.content,
       _sfColor(a.color, opacity: 0.4),
       textMarkupAnnotationType: sf.PdfTextMarkupAnnotationType.highlight,
-    );
-    page.annotations.add(annot);
+    ));
   }
 
   void _addUnderline(sf.PdfPage page, AnnotationModel a) {
-    final annot = sf.PdfTextMarkupAnnotation(
-      _sfRect(a),
+    page.annotations.add(sf.PdfTextMarkupAnnotation(
+      _rect(a),
       a.content.isEmpty ? 'Underline' : a.content,
       _sfColor(a.color),
       textMarkupAnnotationType: sf.PdfTextMarkupAnnotationType.underline,
-    );
-    page.annotations.add(annot);
+    ));
   }
 
   void _addStrikethrough(sf.PdfPage page, AnnotationModel a) {
-    final annot = sf.PdfTextMarkupAnnotation(
-      _sfRect(a),
+    page.annotations.add(sf.PdfTextMarkupAnnotation(
+      _rect(a),
       a.content.isEmpty ? 'Strikethrough' : a.content,
       _sfColor(a.color),
       textMarkupAnnotationType:
           sf.PdfTextMarkupAnnotationType.strikethrough,
-    );
-    page.annotations.add(annot);
+    ));
   }
 
   void _addFreehand(sf.PdfPage page, AnnotationModel a) {
@@ -139,21 +134,20 @@ class PdfService {
     pen.lineCap = sf.PdfLineCap.round;
     final pts = a.pathPoints!;
     for (int i = 0; i < pts.length - 1; i++) {
-      // dart:ui Offset (imported with 'show Offset' — no conflict with sf.Rect)
       page.graphics.drawLine(
         pen,
-        Offset(pts[i]['x']!, pts[i]['y']!),
-        Offset(pts[i + 1]['x']!, pts[i + 1]['y']!),
+        Offset(pts[i]['x']!,       pts[i]['y']!),
+        Offset(pts[i + 1]['x']!,   pts[i + 1]['y']!),
       );
     }
   }
 
   void _addRectangle(sf.PdfPage page, AnnotationModel a) {
     final annot = sf.PdfRectangleAnnotation(
-      _sfRect(a),
+      _rect(a),
       a.content.isEmpty ? 'Rectangle' : a.content,
     );
-    annot.color = _sfColor(a.color);
+    annot.color      = _sfColor(a.color);
     annot.innerColor = sf.PdfColor(0, 0, 0, 0);
     annot.border.width = a.strokeWidth.toInt().toDouble();
     page.annotations.add(annot);
@@ -161,10 +155,10 @@ class PdfService {
 
   void _addCircle(sf.PdfPage page, AnnotationModel a) {
     final annot = sf.PdfEllipseAnnotation(
-      _sfRect(a),
+      _rect(a),
       a.content.isEmpty ? 'Circle' : a.content,
     );
-    annot.color = _sfColor(a.color);
+    annot.color      = _sfColor(a.color);
     annot.innerColor = sf.PdfColor(0, 0, 0, 0);
     annot.border.width = a.strokeWidth.toInt().toDouble();
     page.annotations.add(annot);

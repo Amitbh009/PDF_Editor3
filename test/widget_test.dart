@@ -1,7 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import '../lib/providers/pdf_provider.dart';
+import 'package:pdf_editor/providers/pdf_provider.dart';
 
 void main() {
   group('DocumentNotifier', () {

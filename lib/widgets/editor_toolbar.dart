@@ -40,9 +40,9 @@ class EditorToolbar extends ConsumerWidget {
           children: [
             ..._tools.map(
               (item) => _ToolButton(
-                icon: item.icon,
-                label: item.label,
-                tool: item.tool,
+                icon:       item.icon,
+                label:      item.label,
+                tool:       item.tool,
                 isSelected: selectedTool == item.tool,
                 onTap: () => ref
                     .read(selectedToolProvider.notifier)
@@ -52,7 +52,7 @@ class EditorToolbar extends ConsumerWidget {
 
             const _VSep(),
 
-            // Color swatch
+            // ── Color swatch ──────────────────────────────────────────────
             Tooltip(
               message: 'Annotation color',
               child: GestureDetector(
@@ -68,8 +68,7 @@ class EditorToolbar extends ConsumerWidget {
                         color: theme.colorScheme.outline, width: 2),
                     boxShadow: [
                       BoxShadow(
-                        // ignore: deprecated_member_use
-                        color: Color(selectedColor).withOpacity(0.4),
+                        color: Color(selectedColor).withValues(alpha: 0.4),
                         blurRadius: 4,
                         spreadRadius: 1,
                       ),
@@ -83,8 +82,8 @@ class EditorToolbar extends ConsumerWidget {
 
             Text(
               '${strokeWidth.round()}px',
-              style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.labelSmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
             SizedBox(
               width: 120,
@@ -100,6 +99,7 @@ class EditorToolbar extends ConsumerWidget {
 
             const _VSep(),
 
+            // ── Zoom ──────────────────────────────────────────────────────
             IconButton(
               icon: const Icon(Icons.zoom_out_rounded, size: 20),
               tooltip: 'Zoom Out',
@@ -134,13 +134,13 @@ class EditorToolbar extends ConsumerWidget {
 
             const _VSep(),
 
-            IconButton(
-              icon: const Icon(Icons.undo_rounded, size: 20),
+            const IconButton(
+              icon: Icon(Icons.undo_rounded, size: 20),
               tooltip: 'Undo',
               onPressed: null,
             ),
-            IconButton(
-              icon: const Icon(Icons.redo_rounded, size: 20),
+            const IconButton(
+              icon: Icon(Icons.redo_rounded, size: 20),
               tooltip: 'Redo',
               onPressed: null,
             ),
@@ -183,11 +183,9 @@ class EditorToolbar extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () {
-              // .value works on all Flutter versions (only deprecated in 3.27+,
-              // but still compiles — use ignore comment to suppress on 3.27+)
-              // ignore: deprecated_member_use
+              // toARGB32() is the non-deprecated way on Flutter 3.27+
               ref.read(selectedColorProvider.notifier).state =
-                  picked.value;
+                  picked.toARGB32();
               Navigator.pop(ctx);
             },
             child: const Text('Select'),
@@ -203,8 +201,9 @@ class EditorToolbar extends ConsumerWidget {
       builder: (_) => AlertDialog(
         title: const Text('Clear annotations?'),
         content: const Text(
-            'All annotations on this document will be removed. '
-            'This cannot be undone.'),
+          'All annotations on this document will be removed. '
+          'This cannot be undone.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -227,6 +226,8 @@ class EditorToolbar extends ConsumerWidget {
     );
   }
 }
+
+// ── Internal classes ──────────────────────────────────────────────────────────
 
 class _ToolItem {
   const _ToolItem(this.icon, this.label, this.tool);
@@ -254,10 +255,10 @@ class _ToolButton extends StatelessWidget {
     required this.onTap,
   });
 
-  final IconData   icon;
-  final String     label;
-  final EditorTool tool;
-  final bool       isSelected;
+  final IconData     icon;
+  final String       label;
+  final EditorTool   tool;
+  final bool         isSelected;
   final VoidCallback onTap;
 
   @override
@@ -278,8 +279,7 @@ class _ToolButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             border: isSelected
                 ? Border.all(
-                    // ignore: deprecated_member_use
-                    color: theme.colorScheme.primary.withOpacity(0.4),
+                    color: theme.colorScheme.primary.withValues(alpha: 0.4),
                     width: 1,
                   )
                 : null,

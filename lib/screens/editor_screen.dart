@@ -132,7 +132,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
 
     final theme = Theme.of(context);
 
-    // PopScope replaces the deprecated WillPopScope
+
     return PopScope(
       canPop: !doc.isModified,
       onPopInvokedWithResult: (bool didPop, _) {

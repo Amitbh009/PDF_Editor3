@@ -339,7 +339,7 @@ class _AnnotationPainter extends CustomPainter {
     // Live preview
     final previewPaint = Paint()
       // ignore: deprecated_member_use
-      ..color       = currentColor.withOpacity(0.8)
+      ..color       = currentColor.withValues(alpha: 0.8)
       ..strokeWidth = strokeWidth
       ..style       = PaintingStyle.stroke
       ..strokeCap   = StrokeCap.round
@@ -359,7 +359,7 @@ class _AnnotationPainter extends CustomPainter {
             rect,
             Paint()
               // ignore: deprecated_member_use
-              ..color = currentColor.withOpacity(0.3)
+              ..color = currentColor.withValues(alpha: 0.3)
               ..style = PaintingStyle.fill,
           );
           break;
@@ -395,7 +395,7 @@ class _AnnotationPainter extends CustomPainter {
   void _drawAnnotation(Canvas canvas, AnnotationModel a) {
     final paint = Paint()
       // ignore: deprecated_member_use
-      ..color       = Color(a.color).withOpacity(a.opacity)
+      ..color       = Color(a.color).withValues(alpha: a.opacity)
       ..strokeWidth = a.strokeWidth
       ..style       = PaintingStyle.stroke
       ..strokeCap   = StrokeCap.round
@@ -442,7 +442,7 @@ class _AnnotationPainter extends CustomPainter {
           Rect.fromLTWH(a.x, a.y, a.width, a.height),
           Paint()
             // ignore: deprecated_member_use
-            ..color = Color(a.color).withOpacity(0.35)
+            ..color = Color(a.color).withValues(alpha: 0.35)
             ..style = PaintingStyle.fill,
         );
         break;

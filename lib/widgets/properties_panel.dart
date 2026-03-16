@@ -23,6 +23,7 @@ class PropertiesPanel extends ConsumerWidget {
       ),
       child: Column(
         children: [
+          // Header
           Container(
             padding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -31,23 +32,25 @@ class PropertiesPanel extends ConsumerWidget {
               border:
                   Border(bottom: BorderSide(color: theme.dividerColor)),
             ),
-            child: Row(
+            child: const Row(
               children: [
-                const Icon(Icons.tune_rounded, size: 18),
-                const SizedBox(width: 8),
+                Icon(Icons.tune_rounded, size: 18),
+                SizedBox(width: 8),
                 Text(
                   'Properties',
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 13),
                 ),
               ],
             ),
           ),
+
+          // Controls
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                _Label(text: 'Color'),
+                const _Label(text: 'Color'),
                 const SizedBox(height: 8),
                 GestureDetector(
                   onTap: () =>
@@ -75,7 +78,7 @@ class PropertiesPanel extends ConsumerWidget {
                 ),
 
                 const SizedBox(height: 20),
-                _Label(text: 'Stroke Width'),
+                const _Label(text: 'Stroke Width'),
                 Row(
                   children: [
                     Expanded(
@@ -99,7 +102,7 @@ class PropertiesPanel extends ConsumerWidget {
                 ),
 
                 const SizedBox(height: 12),
-                _Label(text: 'Font Size'),
+                const _Label(text: 'Font Size'),
                 Row(
                   children: [
                     Expanded(
@@ -122,7 +125,7 @@ class PropertiesPanel extends ConsumerWidget {
                 ),
 
                 const SizedBox(height: 12),
-                _Label(text: 'Opacity'),
+                const _Label(text: 'Opacity'),
                 Row(
                   children: [
                     Expanded(
@@ -147,7 +150,7 @@ class PropertiesPanel extends ConsumerWidget {
                 const Divider(height: 32),
 
                 if (doc != null) ...[
-                  _Label(text: 'Document Info'),
+                  const _Label(text: 'Document Info'),
                   const SizedBox(height: 8),
                   _InfoRow(label: 'File',        value: doc.fileName),
                   _InfoRow(label: 'Pages',       value: '${doc.totalPages}'),
@@ -186,9 +189,8 @@ class PropertiesPanel extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () {
-              // ignore: deprecated_member_use
               ref.read(selectedColorProvider.notifier).state =
-                  picked.value;
+                  picked.toARGB32();
               Navigator.pop(ctx);
             },
             child: const Text('Select'),
