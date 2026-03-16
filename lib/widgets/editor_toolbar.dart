@@ -183,9 +183,7 @@ class EditorToolbar extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () {
-              // toARGB32() is the non-deprecated way on Flutter 3.27+
-              ref.read(selectedColorProvider.notifier).state =
-                  picked.toARGB32();
+              ref.read(selectedColorProvider.notifier).state = picked.value;
               Navigator.pop(ctx);
             },
             child: const Text('Select'),
