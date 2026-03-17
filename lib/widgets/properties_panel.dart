@@ -189,7 +189,7 @@ class PropertiesPanel extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () {
-              ref.read(selectedColorProvider.notifier).state = picked.value;
+              ref.read(selectedColorProvider.notifier).state = picked.toARGB32();
               Navigator.pop(ctx);
             },
             child: const Text('Select'),

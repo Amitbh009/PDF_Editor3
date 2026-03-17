@@ -156,6 +156,7 @@ Win32Window::MessageHandler(HWND hwnd, UINT const message,
     case WM_SIZE: {
       RECT rect = GetClientArea();
       if (child_content_ != nullptr) {
+        // Size and position the child window.
         MoveWindow(child_content_, rect.left, rect.top,
                    rect.right - rect.left, rect.bottom - rect.top, TRUE);
       }
