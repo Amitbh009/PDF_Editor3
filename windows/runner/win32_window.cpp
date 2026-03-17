@@ -172,7 +172,7 @@ Win32Window::MessageHandler(HWND hwnd, UINT const message,
       UpdateTheme(hwnd);
       return 0;
   }
-  return DefWindowProc(window_handle_, message, wparam, lparam);
+  return DefWindowProc(hwnd, message, wparam, lparam);
 }
 
 void Win32Window::Destroy() {

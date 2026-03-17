@@ -22,7 +22,6 @@ function(apply_standard_settings target)
   target_compile_features(${target} PUBLIC cxx_std_17)
   target_compile_options(${target} PRIVATE
     /W4
-    /WX
     /wd"4100"
     /wd"4459"
     /wd"5105"
