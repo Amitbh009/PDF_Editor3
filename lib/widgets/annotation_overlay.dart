@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:uuid/uuid.dart';
@@ -10,27 +11,212 @@ const _uuid = Uuid();
 
 class AnnotationOverlay extends ConsumerStatefulWidget {
   const AnnotationOverlay({super.key, required this.pdfController});
-
   final PdfViewerController pdfController;
 
   @override
-  ConsumerState<AnnotationOverlay> createState() =>
-      _AnnotationOverlayState();
+  ConsumerState<AnnotationOverlay> createState() => _AnnotationOverlayState();
 }
 
 class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
+  // Drawing state
   Offset? _drawStart;
   Offset? _drawCurrent;
   List<Offset> _freehandPoints = [];
   bool _isDrawing = false;
 
+  // Drag-to-move state
+  String? _draggingId;
+  Offset? _dragLastPos;
+
+  // Inline text editing state
+  String? _editingId;
+  final TextEditingController _textCtrl = TextEditingController();
+  final FocusNode _textFocus = FocusNode();
+
+  @override
+  void dispose() {
+    _textCtrl.dispose();
+    _textFocus.dispose();
+    super.dispose();
+  }
+
+  // ── Hit testing ──────────────────────────────────────────────────────────────
+  AnnotationModel? _hitTest(List<AnnotationModel> annotations, Offset pos) {
+    // iterate in reverse so topmost annotation wins
+    for (final a in annotations.reversed) {
+      final rect = Rect.fromLTWH(a.x - 8, a.y - 8, a.width + 16, a.height + 16);
+      if (rect.contains(pos)) return a;
+    }
+    return null;
+  }
+
+  // ── Tap logic ────────────────────────────────────────────────────────────────
+  void _onTapUp(TapUpDetails details) {
+    final tool = ref.read(selectedToolProvider);
+    final doc  = ref.read(currentDocumentProvider);
+    if (doc == null) return;
+
+    final annotations = doc.annotations
+        .where((a) => a.pageNumber == doc.currentPage)
+        .toList();
+
+    if (tool == EditorTool.select) {
+      // Finish any inline editing first
+      _commitInlineEdit();
+
+      final hit = _hitTest(annotations, details.localPosition);
+      if (hit != null) {
+        ref.read(selectedAnnotationIdProvider.notifier).state = hit.id;
+        // Double-tap opens edit for text annotations — handled by onDoubleTap
+      } else {
+        ref.read(selectedAnnotationIdProvider.notifier).state = null;
+      }
+      return;
+    }
+
+    if (tool == EditorTool.text) {
+      _commitInlineEdit();
+      _startInlineText(details.localPosition, doc.currentPage);
+      return;
+    }
+
+    if (tool == EditorTool.eraser) {
+      final hit = _hitTest(annotations, details.localPosition);
+      if (hit != null) {
+        ref.read(currentDocumentProvider.notifier).deleteAnnotation(hit.id);
+        final selId = ref.read(selectedAnnotationIdProvider);
+        if (selId == hit.id) {
+          ref.read(selectedAnnotationIdProvider.notifier).state = null;
+        }
+      }
+    }
+  }
+
+  void _onDoubleTap(TapDownDetails details) {
+    final tool = ref.read(selectedToolProvider);
+    final doc  = ref.read(currentDocumentProvider);
+    if (doc == null) return;
+
+    final annotations = doc.annotations
+        .where((a) => a.pageNumber == doc.currentPage)
+        .toList();
+
+    if (tool == EditorTool.select || tool == EditorTool.text) {
+      final hit = _hitTest(annotations, details.localPosition);
+      if (hit != null && hit.type == AnnotationType.text) {
+        _startInlineEditExisting(hit);
+      }
+    }
+  }
+
+  // ── Inline text editing ──────────────────────────────────────────────────────
+  void _startInlineText(Offset pos, int page) {
+    setState(() {
+      _editingId = '__new__';
+      _textCtrl.text = '';
+    });
+    _textFocus.requestFocus();
+    // We store position temporarily in a provider-agnostic way via local state
+    _pendingTextPos = pos;
+    _pendingTextPage = page;
+  }
+
+  Offset? _pendingTextPos;
+  int? _pendingTextPage;
+
+  void _startInlineEditExisting(AnnotationModel a) {
+    setState(() {
+      _editingId = a.id;
+      _textCtrl.text = a.content;
+      _textCtrl.selection = TextSelection.collapsed(offset: a.content.length);
+    });
+    _textFocus.requestFocus();
+  }
+
+  void _commitInlineEdit() {
+    if (_editingId == null) return;
+    final text = _textCtrl.text;
+
+    if (_editingId == '__new__') {
+      if (text.trim().isNotEmpty && _pendingTextPos != null) {
+        final page = _pendingTextPage ?? 1;
+        ref.read(currentDocumentProvider.notifier).addAnnotation(
+          AnnotationModel(
+            id: _uuid.v4(),
+            type: AnnotationType.text,
+            pageNumber: page,
+            x: _pendingTextPos!.dx,
+            y: _pendingTextPos!.dy,
+            width: 300,
+            height: 40,
+            content: text.trim(),
+            color: ref.read(selectedColorProvider),
+            fontSize: ref.read(fontSizeProvider),
+            isBold: ref.read(isBoldProvider),
+            isItalic: ref.read(isItalicProvider),
+            createdAt: DateTime.now(),
+          ),
+        );
+      }
+    } else {
+      final doc = ref.read(currentDocumentProvider);
+      if (doc != null) {
+        final existing = doc.annotations.firstWhere(
+          (a) => a.id == _editingId,
+          orElse: () => doc.annotations.first,
+        );
+        if (existing.id == _editingId) {
+          if (text.trim().isEmpty) {
+            ref.read(currentDocumentProvider.notifier).deleteAnnotation(_editingId!);
+          } else {
+            ref.read(currentDocumentProvider.notifier).updateAnnotation(
+              existing.copyWith(content: text.trim()),
+            );
+          }
+        }
+      }
+    }
+
+    setState(() {
+      _editingId = null;
+      _pendingTextPos = null;
+      _pendingTextPage = null;
+    });
+    _textFocus.unfocus();
+  }
+
+  // ── Pan / draw logic ─────────────────────────────────────────────────────────
   void _onPanStart(DragStartDetails d) {
     final tool = ref.read(selectedToolProvider);
-    if (tool == EditorTool.select) return;
+    final doc  = ref.read(currentDocumentProvider);
+    if (doc == null) return;
+
+    // Commit any pending text edit
+    _commitInlineEdit();
+
+    if (tool == EditorTool.select) {
+      final annotations = doc.annotations
+          .where((a) => a.pageNumber == doc.currentPage)
+          .toList();
+      final hit = _hitTest(annotations, d.localPosition);
+      if (hit != null) {
+        ref.read(selectedAnnotationIdProvider.notifier).state = hit.id;
+        ref.read(currentDocumentProvider.notifier).snapshotForDrag();
+        setState(() {
+          _draggingId  = hit.id;
+          _dragLastPos = d.localPosition;
+        });
+      }
+      return;
+    }
+
+    if (tool == EditorTool.eraser) return;
+    if (tool == EditorTool.text) return;
+
     setState(() {
-      _drawStart  = d.localPosition;
+      _drawStart   = d.localPosition;
       _drawCurrent = d.localPosition;
-      _isDrawing  = true;
+      _isDrawing   = true;
       if (tool == EditorTool.freehand) {
         _freehandPoints = [d.localPosition];
       }
@@ -38,6 +224,14 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
   }
 
   void _onPanUpdate(DragUpdateDetails d) {
+    if (_draggingId != null && _dragLastPos != null) {
+      final delta = d.localPosition - _dragLastPos!;
+      ref.read(currentDocumentProvider.notifier)
+          .moveAnnotationLive(_draggingId!, delta);
+      setState(() => _dragLastPos = d.localPosition);
+      return;
+    }
+
     if (!_isDrawing) return;
     setState(() {
       _drawCurrent = d.localPosition;
@@ -48,11 +242,20 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
   }
 
   void _onPanEnd(DragEndDetails _) {
-    if (!_isDrawing || _drawStart == null) { _reset(); return; }
+    // Finish drag-move
+    if (_draggingId != null) {
+      setState(() {
+        _draggingId  = null;
+        _dragLastPos = null;
+      });
+      return;
+    }
 
-    final tool        = ref.read(selectedToolProvider);
-    final doc         = ref.read(currentDocumentProvider);
-    if (doc == null) { _reset(); return; }
+    if (!_isDrawing || _drawStart == null) { _resetDraw(); return; }
+
+    final tool = ref.read(selectedToolProvider);
+    final doc  = ref.read(currentDocumentProvider);
+    if (doc == null) { _resetDraw(); return; }
 
     final color       = ref.read(selectedColorProvider);
     final strokeWidth = ref.read(strokeWidthProvider);
@@ -140,10 +343,10 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
     if (annotation != null) {
       ref.read(currentDocumentProvider.notifier).addAnnotation(annotation);
     }
-    _reset();
+    _resetDraw();
   }
 
-  void _reset() {
+  void _resetDraw() {
     setState(() {
       _drawStart      = null;
       _drawCurrent    = null;
@@ -152,157 +355,268 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
     });
   }
 
-  void _onTapForText(TapUpDetails details) {
-    final doc = ref.read(currentDocumentProvider);
-    if (doc == null) return;
-    showDialog<void>(
-      context: context,
-      builder: (_) => _TextInputDialog(
-        position: details.localPosition,
-        page: doc.currentPage,
-      ),
-    );
+  // ── Keyboard: Delete key removes selected annotation ─────────────────────────
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.delete ||
+          event.logicalKey == LogicalKeyboardKey.backspace) {
+        final selId = ref.read(selectedAnnotationIdProvider);
+        if (selId != null && _editingId == null) {
+          ref.read(currentDocumentProvider.notifier).deleteAnnotation(selId);
+          ref.read(selectedAnnotationIdProvider.notifier).state = null;
+          return KeyEventResult.handled;
+        }
+      }
+      // Ctrl+Z / Ctrl+Y
+      if (HardwareKeyboard.instance.isControlPressed) {
+        if (event.logicalKey == LogicalKeyboardKey.keyZ) {
+          ref.read(currentDocumentProvider.notifier).undo();
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.keyY) {
+          ref.read(currentDocumentProvider.notifier).redo();
+          return KeyEventResult.handled;
+        }
+      }
+    }
+    return KeyEventResult.ignored;
   }
 
   @override
   Widget build(BuildContext context) {
-    final tool = ref.watch(selectedToolProvider);
-    final doc  = ref.watch(currentDocumentProvider);
+    final tool       = ref.watch(selectedToolProvider);
+    final doc        = ref.watch(currentDocumentProvider);
+    final selectedId = ref.watch(selectedAnnotationIdProvider);
     if (doc == null) return const SizedBox.shrink();
-
-    final cursor = tool == EditorTool.select
-        ? SystemMouseCursors.basic
-        : tool == EditorTool.text
-            ? SystemMouseCursors.text
-            : SystemMouseCursors.precise;
 
     final annotations = doc.annotations
         .where((a) => a.pageNumber == doc.currentPage)
         .toList();
 
-    return MouseRegion(
-      cursor: cursor,
-      child: GestureDetector(
-        onPanStart: _onPanStart,
-        onPanUpdate: _onPanUpdate,
-        onPanEnd: _onPanEnd,
-        onTapUp: tool == EditorTool.text ? _onTapForText : null,
-        child: CustomPaint(
-          painter: _AnnotationPainter(
-            annotations:  annotations,
-            freehandPoints: _freehandPoints,
-            drawStart:    _drawStart,
-            drawCurrent:  _drawCurrent,
-            currentTool:  tool,
-            currentColor: Color(ref.watch(selectedColorProvider)),
-            strokeWidth:  ref.watch(strokeWidthProvider),
-            opacity:      ref.watch(opacityProvider),
+    final cursor = tool == EditorTool.select
+        ? (_draggingId != null
+            ? SystemMouseCursors.grabbing
+            : SystemMouseCursors.basic)
+        : tool == EditorTool.text
+            ? SystemMouseCursors.text
+            : tool == EditorTool.eraser
+                ? SystemMouseCursors.precise
+                : SystemMouseCursors.precise;
+
+    return Focus(
+      onKeyEvent: _handleKeyEvent,
+      autofocus: true,
+      child: MouseRegion(
+        cursor: cursor,
+        child: GestureDetector(
+          onPanStart:  _onPanStart,
+          onPanUpdate: _onPanUpdate,
+          onPanEnd:    _onPanEnd,
+          onTapUp:     _onTapUp,
+          onDoubleTapDown: _onDoubleTap,
+          child: Stack(
+            children: [
+              // ── Canvas layer ───────────────────────────────────────────
+              CustomPaint(
+                painter: _AnnotationPainter(
+                  annotations:    annotations,
+                  freehandPoints: _freehandPoints,
+                  drawStart:      _drawStart,
+                  drawCurrent:    _drawCurrent,
+                  currentTool:    tool,
+                  currentColor:   Color(ref.watch(selectedColorProvider)),
+                  strokeWidth:    ref.watch(strokeWidthProvider),
+                  opacity:        ref.watch(opacityProvider),
+                  selectedId:     selectedId,
+                  editingId:      _editingId,
+                ),
+                child: Container(color: Colors.transparent),
+              ),
+
+              // ── Inline text editor ─────────────────────────────────────
+              if (_editingId != null)
+                _buildInlineEditor(annotations),
+
+              // ── Selection handles ──────────────────────────────────────
+              if (tool == EditorTool.select && selectedId != null && _editingId == null)
+                _buildSelectionHandle(annotations, selectedId!),
+            ],
           ),
-          child: Container(color: Colors.transparent),
         ),
       ),
     );
   }
-}
 
-// ── Text input dialog ─────────────────────────────────────────────────────────
+  Widget _buildInlineEditor(List<AnnotationModel> annotations) {
+    // Determine position
+    Offset pos;
+    double width;
+    double fontSize;
+    bool isBold;
+    bool isItalic;
+    int color;
 
-class _TextInputDialog extends ConsumerStatefulWidget {
-  const _TextInputDialog({required this.position, required this.page});
+    if (_editingId == '__new__') {
+      pos      = _pendingTextPos ?? Offset.zero;
+      width    = 300;
+      fontSize = ref.read(fontSizeProvider);
+      isBold   = ref.read(isBoldProvider);
+      isItalic = ref.read(isItalicProvider);
+      color    = ref.read(selectedColorProvider);
+    } else {
+      final doc = ref.read(currentDocumentProvider);
+      final found = doc?.annotations.where((a) => a.id == _editingId);
+      if (found == null || found.isEmpty) return const SizedBox.shrink();
+      final a = found.first;
+      pos      = Offset(a.x, a.y);
+      width    = a.width.clamp(150.0, 500.0);
+      fontSize = a.fontSize;
+      isBold   = a.isBold;
+      isItalic = a.isItalic;
+      color    = a.color;
+    }
 
-  final Offset position;
-  final int page;
-
-  @override
-  ConsumerState<_TextInputDialog> createState() =>
-      _TextInputDialogState();
-}
-
-class _TextInputDialogState extends ConsumerState<_TextInputDialog> {
-  final _ctrl = TextEditingController();
-  bool _bold   = false;
-  bool _italic = false;
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final fontSize = ref.watch(fontSizeProvider);
-    return AlertDialog(
-      title: const Text('Add Text Annotation'),
-      content: SizedBox(
-        width: 360,
+    return Positioned(
+      left: pos.dx,
+      top:  pos.dy,
+      width: width,
+      child: Material(
+        elevation: 4,
+        borderRadius: BorderRadius.circular(4),
+        color: Colors.white.withValues(alpha: 0.95),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
-              controller: _ctrl,
-              autofocus: true,
-              maxLines: 5,
-              decoration: const InputDecoration(
-                hintText: 'Enter text here…',
-                border: OutlineInputBorder(),
-                filled: true,
+            // Mini toolbar
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Edit text:', style: TextStyle(fontSize: 11, color: Colors.black54)),
+                  const Spacer(),
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      minimumSize: const Size(0, 24),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: _commitInlineEdit,
+                    child: const Text('Done', style: TextStyle(fontSize: 11)),
+                  ),
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      minimumSize: const Size(0, 24),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _editingId = null;
+                        _pendingTextPos = null;
+                      });
+                      _textFocus.unfocus();
+                    },
+                    child: const Text('Cancel', style: TextStyle(fontSize: 11, color: Colors.red)),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                FilterChip(
-                  label: const Text('Bold'),
-                  selected: _bold,
-                  onSelected: (v) => setState(() => _bold = v),
+            Padding(
+              padding: const EdgeInsets.all(4),
+              child: TextField(
+                controller: _textCtrl,
+                focusNode: _textFocus,
+                maxLines: null,
+                autofocus: true,
+                style: TextStyle(
+                  fontSize: fontSize,
+                  fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+                  fontStyle: isItalic ? FontStyle.italic : FontStyle.normal,
+                  color: Color(color),
                 ),
-                const SizedBox(width: 8),
-                FilterChip(
-                  label: const Text('Italic'),
-                  selected: _italic,
-                  onSelected: (v) => setState(() => _italic = v),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                  hintText: 'Type here…',
                 ),
-                const Spacer(),
-                Text('${fontSize.round()}pt',
-                    style: Theme.of(context).textTheme.labelSmall),
-              ],
+                onSubmitted: (_) => _commitInlineEdit(),
+              ),
             ),
           ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () {
-            if (_ctrl.text.trim().isNotEmpty) {
-              ref.read(currentDocumentProvider.notifier).addAnnotation(
-                    AnnotationModel(
-                      id: const Uuid().v4(),
-                      type: AnnotationType.text,
-                      pageNumber: widget.page,
-                      x: widget.position.dx,
-                      y: widget.position.dy,
-                      width: 240,
-                      height: 40,
-                      content: _ctrl.text.trim(),
-                      color: ref.read(selectedColorProvider),
-                      fontSize: ref.read(fontSizeProvider),
-                      isBold: _bold,
-                      isItalic: _italic,
-                      createdAt: DateTime.now(),
-                    ),
-                  );
-            }
-            Navigator.pop(context);
-          },
-          child: const Text('Add Text'),
-        ),
-      ],
+    );
+  }
+
+  Widget _buildSelectionHandle(List<AnnotationModel> annotations, String selectedId) {
+    final doc = ref.read(currentDocumentProvider);
+    final found = doc?.annotations.where((a) => a.id == selectedId);
+    if (found == null || found.isEmpty) return const SizedBox.shrink();
+    final a = found.first;
+
+    return Positioned(
+      left: a.x - 8,
+      top:  a.y - 8,
+      width:  a.width + 16,
+      height: a.height + 16,
+      child: Stack(
+        children: [
+          // Dashed selection border
+          Container(
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: Colors.blue.withValues(alpha: 0.8),
+                width: 1.5,
+              ),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          // Delete button top-right
+          Positioned(
+            right: 0,
+            top: 0,
+            child: GestureDetector(
+              onTap: () {
+                ref.read(currentDocumentProvider.notifier).deleteAnnotation(selectedId);
+                ref.read(selectedAnnotationIdProvider.notifier).state = null;
+              },
+              child: Container(
+                width: 20,
+                height: 20,
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.close, size: 12, color: Colors.white),
+              ),
+            ),
+          ),
+          // Edit button (for text annotations)
+          if (a.type == AnnotationType.text)
+            Positioned(
+              left: 0,
+              top: 0,
+              child: GestureDetector(
+                onTap: () => _startInlineEditExisting(a),
+                child: Container(
+                  width: 20,
+                  height: 20,
+                  decoration: const BoxDecoration(
+                    color: Colors.blue,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.edit, size: 12, color: Colors.white),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -319,6 +633,8 @@ class _AnnotationPainter extends CustomPainter {
     required this.currentColor,
     required this.strokeWidth,
     required this.opacity,
+    required this.selectedId,
+    required this.editingId,
   });
 
   final List<AnnotationModel> annotations;
@@ -329,16 +645,19 @@ class _AnnotationPainter extends CustomPainter {
   final Color currentColor;
   final double strokeWidth;
   final double opacity;
+  final String? selectedId;
+  final String? editingId;
 
   @override
   void paint(Canvas canvas, Size size) {
     for (final a in annotations) {
+      // Skip text that is currently being edited inline (the TextField shows it)
+      if (a.id == editingId) continue;
       _drawAnnotation(canvas, a);
     }
 
-    // Live preview
+    // Live preview while drawing
     final previewPaint = Paint()
-      // ignore: deprecated_member_use
       ..color       = currentColor.withValues(alpha: 0.8)
       ..strokeWidth = strokeWidth
       ..style       = PaintingStyle.stroke
@@ -355,27 +674,18 @@ class _AnnotationPainter extends CustomPainter {
           canvas.drawOval(rect, previewPaint);
           break;
         case EditorTool.highlight:
-          canvas.drawRect(
-            rect,
-            Paint()
-              // ignore: deprecated_member_use
-              ..color = currentColor.withValues(alpha: 0.3)
-              ..style = PaintingStyle.fill,
-          );
+          canvas.drawRect(rect,
+              Paint()
+                ..color = currentColor.withValues(alpha: 0.3)
+                ..style = PaintingStyle.fill);
           break;
         case EditorTool.underline:
-          canvas.drawLine(
-            Offset(rect.left, rect.bottom),
-            Offset(rect.right, rect.bottom),
-            previewPaint,
-          );
+          canvas.drawLine(Offset(rect.left, rect.bottom),
+              Offset(rect.right, rect.bottom), previewPaint);
           break;
         case EditorTool.strikethrough:
-          canvas.drawLine(
-            Offset(rect.left, rect.center.dy),
-            Offset(rect.right, rect.center.dy),
-            previewPaint,
-          );
+          canvas.drawLine(Offset(rect.left, rect.center.dy),
+              Offset(rect.right, rect.center.dy), previewPaint);
           break;
         default:
           break;
@@ -393,8 +703,8 @@ class _AnnotationPainter extends CustomPainter {
   }
 
   void _drawAnnotation(Canvas canvas, AnnotationModel a) {
+    final isSelected = a.id == selectedId;
     final paint = Paint()
-      // ignore: deprecated_member_use
       ..color       = Color(a.color).withValues(alpha: a.opacity)
       ..strokeWidth = a.strokeWidth
       ..style       = PaintingStyle.stroke
@@ -405,8 +715,7 @@ class _AnnotationPainter extends CustomPainter {
       case AnnotationType.freehand:
         if (a.pathPoints != null && a.pathPoints!.length > 1) {
           final path = Path()
-            ..moveTo(
-                a.pathPoints!.first['x']!, a.pathPoints!.first['y']!);
+            ..moveTo(a.pathPoints!.first['x']!, a.pathPoints!.first['y']!);
           for (final p in a.pathPoints!.skip(1)) {
             path.lineTo(p['x']!, p['y']!);
           }
@@ -414,12 +723,10 @@ class _AnnotationPainter extends CustomPainter {
         }
         break;
       case AnnotationType.rectangle:
-        canvas.drawRect(
-            Rect.fromLTWH(a.x, a.y, a.width, a.height), paint);
+        canvas.drawRect(Rect.fromLTWH(a.x, a.y, a.width, a.height), paint);
         break;
       case AnnotationType.circle:
-        canvas.drawOval(
-            Rect.fromLTWH(a.x, a.y, a.width, a.height), paint);
+        canvas.drawOval(Rect.fromLTWH(a.x, a.y, a.width, a.height), paint);
         break;
       case AnnotationType.text:
         TextPainter(
@@ -441,7 +748,6 @@ class _AnnotationPainter extends CustomPainter {
         canvas.drawRect(
           Rect.fromLTWH(a.x, a.y, a.width, a.height),
           Paint()
-            // ignore: deprecated_member_use
             ..color = Color(a.color).withValues(alpha: 0.35)
             ..style = PaintingStyle.fill,
         );
@@ -456,6 +762,17 @@ class _AnnotationPainter extends CustomPainter {
         break;
       default:
         break;
+    }
+
+    // Draw selection highlight outline (subtle blue glow)
+    if (isSelected && a.type != AnnotationType.text) {
+      canvas.drawRect(
+        Rect.fromLTWH(a.x - 4, a.y - 4, a.width + 8, a.height + 8),
+        Paint()
+          ..color = Colors.blue.withValues(alpha: 0.25)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5,
+      );
     }
   }
 

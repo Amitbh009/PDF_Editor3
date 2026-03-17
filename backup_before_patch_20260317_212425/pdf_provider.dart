@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:ui' show Offset;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
@@ -33,7 +32,7 @@ enum EditorTool {
 // ─── Style / tool providers ───────────────────────────────────────────────────
 final selectedToolProvider =
     StateProvider<EditorTool>((ref) => EditorTool.select);
-final selectedColorProvider = StateProvider<int>((ref) => 0xFF000000);
+final selectedColorProvider = StateProvider<int>((ref) => 0xFFFF0000);
 final strokeWidthProvider   = StateProvider<double>((ref) => 2.0);
 final fontSizeProvider      = StateProvider<double>((ref) => 14.0);
 final opacityProvider       = StateProvider<double>((ref) => 1.0);
@@ -41,22 +40,11 @@ final zoomLevelProvider     = StateProvider<double>((ref) => 1.0);
 final isBoldProvider        = StateProvider<bool>((ref) => false);
 final isItalicProvider      = StateProvider<bool>((ref) => false);
 
-/// The ID of the annotation currently selected with the Select tool.
-final selectedAnnotationIdProvider = StateProvider<String?>((ref) => null);
-
-// ─── History availability providers ──────────────────────────────────────────
-final canUndoProvider = Provider<bool>((ref) {
-  final notifier = ref.watch(currentDocumentProvider.notifier);
-  // watch document changes to rebuild
-  ref.watch(currentDocumentProvider);
-  return notifier.canUndo;
-});
-
-final canRedoProvider = Provider<bool>((ref) {
-  final notifier = ref.watch(currentDocumentProvider.notifier);
-  ref.watch(currentDocumentProvider);
-  return notifier.canRedo;
-});
+// ─── Undo / redo ──────────────────────────────────────────────────────────────
+final undoStackProvider =
+    StateProvider<List<List<AnnotationModel>>>((ref) => []);
+final redoStackProvider =
+    StateProvider<List<List<AnnotationModel>>>((ref) => []);
 
 // ─── Document notifier ────────────────────────────────────────────────────────
 class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
@@ -64,46 +52,7 @@ class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
 
   final PdfService _pdfService;
 
-  // ── History stacks ────────────────────────────────────────────────────────
-  final List<List<AnnotationModel>> _undoStack = [];
-  final List<List<AnnotationModel>> _redoStack = [];
-
-  bool get canUndo => _undoStack.isNotEmpty;
-  bool get canRedo => _redoStack.isNotEmpty;
-
-  /// Save a snapshot BEFORE a mutating operation.
-  void _snapshot() {
-    if (state == null) return;
-    _undoStack.add(List<AnnotationModel>.from(state!.annotations));
-    _redoStack.clear();
-  }
-
-  void undo() {
-    if (state == null || _undoStack.isEmpty) return;
-    _redoStack.add(List<AnnotationModel>.from(state!.annotations));
-    final prev = _undoStack.removeLast();
-    state = state!.copyWith(
-      annotations: List<AnnotationModel>.from(prev),
-      isModified: true,
-      lastModified: DateTime.now(),
-    );
-  }
-
-  void redo() {
-    if (state == null || _redoStack.isEmpty) return;
-    _undoStack.add(List<AnnotationModel>.from(state!.annotations));
-    final next = _redoStack.removeLast();
-    state = state!.copyWith(
-      annotations: List<AnnotationModel>.from(next),
-      isModified: true,
-      lastModified: DateTime.now(),
-    );
-  }
-
-  // ── Document lifecycle ────────────────────────────────────────────────────
   Future<void> openDocument(String filePath) async {
-    _undoStack.clear();
-    _redoStack.clear();
     final pageCount = await _pdfService.getPageCount(filePath);
     state = PdfDocumentModel(
       id: _uuid.v4(),
@@ -114,10 +63,8 @@ class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
     );
   }
 
-  // ── CRUD ──────────────────────────────────────────────────────────────────
   void addAnnotation(AnnotationModel annotation) {
     if (state == null) return;
-    _snapshot();
     state = state!.copyWith(
       annotations: [...state!.annotations, annotation],
       isModified: true,
@@ -127,35 +74,30 @@ class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
 
   void updateAnnotation(AnnotationModel annotation) {
     if (state == null) return;
-    _snapshot();
     state = state!.copyWith(
       annotations: state!.annotations
           .map((a) => a.id == annotation.id ? annotation : a)
           .toList(),
       isModified: true,
-      lastModified: DateTime.now(),
     );
   }
 
   void deleteAnnotation(String id) {
     if (state == null) return;
-    _snapshot();
     state = state!.copyWith(
-      annotations: state!.annotations.where((a) => a.id != id).toList(),
+      annotations:
+          state!.annotations.where((a) => a.id != id).toList(),
       isModified: true,
-      lastModified: DateTime.now(),
     );
   }
 
   void deleteAllAnnotations() {
     if (state == null) return;
-    _snapshot();
     state = state!.copyWith(annotations: [], isModified: true);
   }
 
   void deleteAllOnPage(int page) {
     if (state == null) return;
-    _snapshot();
     state = state!.copyWith(
       annotations: state!.annotations
           .where((a) => a.pageNumber != page)
@@ -169,22 +111,6 @@ class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
     state = state!.copyWith(currentPage: page);
   }
 
-  // ── Live drag (no undo snapshot — called every frame) ─────────────────────
-  void moveAnnotationLive(String id, Offset delta) {
-    if (state == null) return;
-    state = state!.copyWith(
-      annotations: state!.annotations.map((a) {
-        if (a.id != id) return a;
-        return a.copyWith(x: a.x + delta.dx, y: a.y + delta.dy);
-      }).toList(),
-      isModified: true,
-    );
-  }
-
-  /// Call this BEFORE starting a live drag to save a proper undo point.
-  void snapshotForDrag() => _snapshot();
-
-  // ── Save ─────────────────────────────────────────────────────────────────
   Future<String> saveDocument(String outputPath) async {
     if (state == null) throw Exception('No document open');
     await _pdfService.saveWithAnnotations(
@@ -196,9 +122,5 @@ class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
     return outputPath;
   }
 
-  void closeDocument() {
-    _undoStack.clear();
-    _redoStack.clear();
-    state = null;
-  }
+  void closeDocument() => state = null;
 }
