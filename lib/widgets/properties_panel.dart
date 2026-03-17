@@ -189,7 +189,7 @@ class PropertiesPanel extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () {
-              # ignore: deprecated_member_use
+              // ignore: deprecated_member_use
               ref.read(selectedColorProvider.notifier).state = picked.value;
               Navigator.pop(ctx);
             },
