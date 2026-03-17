@@ -14,6 +14,7 @@ env:
 
 jobs:
 
+  # ── Code quality gate ───────────────────────────────────────────────────────
   analyze:
     name: 🔍 Analyze & Test
     runs-on: ubuntu-latest
@@ -34,6 +35,7 @@ jobs:
       - name: Test
         run: flutter test
 
+  # ── Android APK + AAB ───────────────────────────────────────────────────────
   build-android:
     name: 🤖 Android (APK + AAB)
     runs-on: ubuntu-latest
@@ -101,6 +103,7 @@ jobs:
           path: build/debug-info/android/
           retention-days: 90
 
+  # ── Windows EXE + Installer ─────────────────────────────────────────────────
   build-windows:
     name: 🪟 Windows (EXE + Installer)
     runs-on: windows-latest
@@ -205,6 +208,7 @@ jobs:
           path: PDFEditor-Setup-*.exe
           retention-days: 30
 
+  # ── GitHub Release ───────────────────────────────────────────────────────────
   release:
     name: 🚀 Publish Release
     runs-on: ubuntu-latest

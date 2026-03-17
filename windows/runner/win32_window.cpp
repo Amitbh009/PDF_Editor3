@@ -7,9 +7,10 @@
 
 namespace {
 
+// Track number of active windows to manage window class registration lifetime.
+static int g_active_window_count = 0;
+
 /// Window attribute that enables dark mode window decorations.
-///
-/// Redefined here because the value doesn't exist in early Windows 10 SDKs.
 static const DWORD DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
 /// Registry key for app theme preference.
@@ -17,9 +18,12 @@ static const wchar_t kGetPreferredBrightnessRegKey[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
 static const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme";
 
-// Returns the current +Windows app theme (light or dark mode).
-// See:
-// https://docs.microsoft.com/en-us/windows/apps/desktop/modernize/apply-windows-themes
+// Scales |source| from logical to physical pixels for the given |dpi|.
+static int Scale(int source, double dpi_scale) {
+  return static_cast<int>(source * dpi_scale);
+}
+
+// Returns the current Windows app theme (light or dark mode).
 bool IsAppThemeDark() {
   DWORD light_mode;
   DWORD light_mode_size = sizeof(light_mode);
@@ -33,12 +37,18 @@ bool IsAppThemeDark() {
   return false;
 }
 
+// Applies dark/light title-bar colouring to |window|.
+static void UpdateTheme(HWND window) {
+  BOOL dark_mode = IsAppThemeDark();
+  DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark_mode,
+                        sizeof(dark_mode));
+}
+
 // Manages the Win32 window class lifecycle.
 class WindowClassRegistrar {
  public:
   ~WindowClassRegistrar() = default;
 
-  // Returns the singleton registrar instance.
   static WindowClassRegistrar* GetInstance() {
     if (!instance_) {
       instance_ = new WindowClassRegistrar();
@@ -46,18 +56,12 @@ class WindowClassRegistrar {
     return instance_;
   }
 
-  // Returns the name of the window class, registering the class if needed.
   const wchar_t* GetWindowClass();
-
-  // Unregisters the window class. Should only be called if there are no
-  // instances of the window.
   void UnregisterWindowClass();
 
  private:
   WindowClassRegistrar() = default;
-
   static WindowClassRegistrar* instance_;
-
   bool class_registered_ = false;
 };
 
@@ -100,8 +104,8 @@ Win32Window::~Win32Window() {
 }
 
 bool Win32Window::Create(const std::wstring& title,
-                          const Point& origin,
-                          const Size& size) {
+                         const Point& origin,
+                         const Size& size) {
   Destroy();
   const wchar_t* window_class =
       WindowClassRegistrar::GetInstance()->GetWindowClass();
@@ -129,8 +133,8 @@ bool Win32Window::Create(const std::wstring& title,
 
 LRESULT
 Win32Window::MessageHandler(HWND hwnd, UINT const message,
-                              WPARAM const wparam,
-                              LPARAM const lparam) noexcept {
+                             WPARAM const wparam,
+                             LPARAM const lparam) noexcept {
   switch (message) {
     case WM_DESTROY:
       window_handle_ = nullptr;
@@ -144,18 +148,16 @@ Win32Window::MessageHandler(HWND hwnd, UINT const message,
       auto newRectSize = reinterpret_cast<RECT*>(lparam);
       LONG newWidth = newRectSize->right - newRectSize->left;
       LONG newHeight = newRectSize->bottom - newRectSize->top;
-
-      SetWindowPos(hwnd, nullptr, newRectSize->left, newRectSize->top, newWidth,
-                   newHeight, SWP_NOZORDER | SWP_NOACTIVATE);
-
+      SetWindowPos(hwnd, nullptr, newRectSize->left, newRectSize->top,
+                   newWidth, newHeight, SWP_NOZORDER | SWP_NOACTIVATE);
       return 0;
     }
+
     case WM_SIZE: {
       RECT rect = GetClientArea();
       if (child_content_ != nullptr) {
-        // Size and position the child window.
-        MoveWindow(child_content_, rect.left, rect.top, rect.right - rect.left,
-                   rect.bottom - rect.top, TRUE);
+        MoveWindow(child_content_, rect.left, rect.top,
+                   rect.right - rect.left, rect.bottom - rect.top, TRUE);
       }
       return 0;
     }
@@ -193,10 +195,8 @@ void Win32Window::SetChildContent(HWND content) {
   child_content_ = content;
   SetParent(content, window_handle_);
   RECT frame = GetClientArea();
-
   MoveWindow(content, frame.left, frame.top, frame.right - frame.left,
              frame.bottom - frame.top, true);
-
   SetFocus(child_content_);
 }
 
@@ -215,7 +215,6 @@ void Win32Window::SetQuitOnClose(bool quit_on_close) {
 }
 
 bool Win32Window::OnCreate() {
-  // No-op; provided for subclasses.
   return true;
 }
 
@@ -224,13 +223,12 @@ void Win32Window::OnDestroy() {
 }
 
 LRESULT CALLBACK Win32Window::WndProc(HWND const window, UINT const message,
-                                       WPARAM const wparam,
-                                       LPARAM const lparam) noexcept {
+                                      WPARAM const wparam,
+                                      LPARAM const lparam) noexcept {
   if (message == WM_NCCREATE) {
     auto window_struct = reinterpret_cast<CREATESTRUCT*>(lparam);
     SetWindowLongPtr(window, GWLP_USERDATA,
                      reinterpret_cast<LONG_PTR>(window_struct->lpCreateParams));
-
     auto that = static_cast<Win32Window*>(window_struct->lpCreateParams);
     EnableNonClientDpiScaling(window);
     that->window_handle_ = window;
@@ -238,12 +236,6 @@ LRESULT CALLBACK Win32Window::WndProc(HWND const window, UINT const message,
     return that->MessageHandler(window, message, wparam, lparam);
   }
   return DefWindowProc(window, message, wparam, lparam);
-}
-
-void Win32Window::UpdateTheme(HWND const window) {
-  BOOL dark_mode = IsAppThemeDark();
-  DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark_mode,
-                         sizeof(dark_mode));
 }
 
 void Win32Window::Show() {
