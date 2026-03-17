@@ -44,7 +44,11 @@ static void UpdateTheme(HWND window) {
                         sizeof(dark_mode));
 }
 
-// Manages the Win32 window class lifecycle.
+}  // namespace
+
+// WindowClassRegistrar is at file scope (NOT inside anonymous namespace) so
+// that the 'friend class WindowClassRegistrar' in win32_window.h correctly
+// grants access to Win32Window's private members (WndProc, window_handle_).
 class WindowClassRegistrar {
  public:
   ~WindowClassRegistrar() = default;
@@ -91,8 +95,6 @@ void WindowClassRegistrar::UnregisterWindowClass() {
   UnregisterClass(L"FLUTTER_RUNNER_WIN32_WINDOW", nullptr);
   class_registered_ = false;
 }
-
-}  // namespace
 
 Win32Window::Win32Window() {
   ++g_active_window_count;
