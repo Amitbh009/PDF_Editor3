@@ -189,7 +189,8 @@ class PropertiesPanel extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () {
-              ref.read(selectedColorProvider.notifier).state = picked.toARGB32();
+              # ignore: deprecated_member_use
+              ref.read(selectedColorProvider.notifier).state = picked.value;
               Navigator.pop(ctx);
             },
             child: const Text('Select'),
