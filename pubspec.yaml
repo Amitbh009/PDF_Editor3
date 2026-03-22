@@ -4,45 +4,53 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.4.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
 
   # ── PDF rendering & editing (PDFium) ─────────────────────────────────────
-  # pdfrx wraps Google PDFium for rendering, text extraction (with exact
-  # glyph-level bounds), and saving.  It replaces both
-  # syncfusion_flutter_pdfviewer and syncfusion_flutter_pdf.
+  # pdfrx wraps Google PDFium. Requires web ^1.1.1.
   pdfrx: ^2.2.24
 
   # ── File system ───────────────────────────────────────────────────────────
-  file_picker: ^8.0.3
-  path_provider: ^2.1.3
-  permission_handler: ^11.3.1
+  # file_picker 10.x — API unchanged from 8.x for pickFiles()
+  file_picker: ^10.3.0
+  path_provider: ^2.1.5
+  # permission_handler 12.x — API unchanged for Permission.storage.request()
+  permission_handler: ^12.0.0
 
   # ── State management ──────────────────────────────────────────────────────
-  flutter_riverpod: ^2.5.1
-  riverpod_annotation: ^2.3.5
+  # Staying on Riverpod 2.6.1 (latest 2.x). Riverpod 3.0 is a major breaking
+  # change (StateNotifierProvider moved to legacy.dart) requiring full
+  # provider rewrite. 2.6.1 is fully stable and compatible with all
+  # packages in this pubspec.
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
 
   # ── UI / UX ───────────────────────────────────────────────────────────────
   flutter_colorpicker: ^1.1.0
   google_fonts: ^6.2.1
 
   # ── Utilities ─────────────────────────────────────────────────────────────
-  uuid: ^4.4.0
-  freezed_annotation: ^2.4.1
+  uuid: ^4.5.1
+  freezed_annotation: ^2.4.4
   json_annotation: ^4.9.0
-  share_plus: ^9.0.0
+  # share_plus 12.0.1 — fixes web ^1.1.x conflict with pdfrx.
+  # BREAKING: API changed to SharePlus.instance.share(ShareParams(...)).
+  # All call sites in this project have been updated accordingly.
+  share_plus: ^12.0.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^4.0.0
-  build_runner: ^2.4.11
-  freezed: ^2.5.2
-  json_serializable: ^6.8.0
-  riverpod_generator: ^2.4.0
+  flutter_lints: ^5.0.0
+  build_runner: ^2.4.14
+  # freezed 2.5.7 — last stable 2.x, compatible with freezed_annotation ^2.4.4
+  freezed: ^2.5.7
+  json_serializable: ^6.9.2
+  riverpod_generator: ^2.6.3
 
 flutter:
   uses-material-design: true

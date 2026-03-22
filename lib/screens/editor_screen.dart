@@ -84,9 +84,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
           behavior: SnackBarBehavior.floating,
           action: SnackBarAction(
             label:     'Share',
-            onPressed: () => Share.shareXFiles(
-              [XFile(outputPath)],
-              subject: 'Edited PDF',
+            onPressed: () => SharePlus.instance.share(
+              ShareParams(files: [XFile(outputPath)], subject: 'Edited PDF'),
             ),
           ),
         ),
@@ -224,9 +223,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
             ),
             IconButton(
               icon:      const Icon(Icons.share_rounded),
-              onPressed: () => Share.shareXFiles(
-                [XFile(doc.filePath)],
-                subject: doc.fileName,
+              onPressed: () => SharePlus.instance.share(
+                ShareParams(files: [XFile(doc.filePath)], subject: doc.fileName),
               ),
               tooltip: 'Share original',
             ),
