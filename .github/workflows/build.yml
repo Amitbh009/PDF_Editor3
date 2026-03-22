@@ -1,4 +1,4 @@
-name: Build PDF Editor
+name: Build PDF Editor (PDFium)
 
 on:
   push:
@@ -9,66 +9,96 @@ on:
   workflow_dispatch:
 
 env:
-  FLUTTER_VERSION: '3.27.4'
+  # ─── Flutter version ────────────────────────────────────────────────────────
+  # pdfrx 2.2.24 changelog requires Flutter 3.29+ / Dart 3.7+.
+  # Using 3.29.x (latest stable as of early 2026).
+  FLUTTER_VERSION: '3.29.2'
   JAVA_VERSION: '17'
 
 jobs:
 
-  # ── Code quality gate ───────────────────────────────────────────────────────
+  # ── Code quality gate ────────────────────────────────────────────────────────
   analyze:
     name: 🔍 Analyze & Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+
       - name: Get dependencies
         run: flutter pub get
+
       - name: Generate code (freezed / riverpod)
         run: dart run build_runner build --delete-conflicting-outputs
+
       - name: Analyze
         run: flutter analyze --no-fatal-infos
+
       - name: Test
         run: flutter test
 
-  # ── Android APK + AAB ───────────────────────────────────────────────────────
+  # ── Android APK + AAB ────────────────────────────────────────────────────────
   build-android:
     name: 🤖 Android (APK + AAB)
     runs-on: ubuntu-latest
     needs: analyze
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Java ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: temurin
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+
+      # ── pdfrx change #1 ─────────────────────────────────────────────────────
+      # pdfrx bundles pre-built PDFium .so libraries for Android (arm64-v8a,
+      # armeabi-v7a, x86_64).  The Android NDK is NOT needed to build pdfrx —
+      # it ships binaries, not source.  The ubuntu-latest runner already has
+      # the Android SDK; no extra NDK install step is required.
+      # minSdk 23 in android/app/build.gradle already satisfies pdfrx (min 21).
+
       - name: Get dependencies
         run: flutter pub get
+
       - name: Generate code
         run: dart run build_runner build --delete-conflicting-outputs
+
+      # ── pdfrx change #2 ─────────────────────────────────────────────────────
+      # pdfrx ships WASM binaries for Web support inside its assets.
+      # They add ~3 MB to every build regardless of platform.
+      # Remove them for Android release builds to keep APK/AAB smaller.
+      - name: Remove WASM modules (release builds only)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: dart run pdfrx:remove_wasm_modules
+
       - name: Decode keystore
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode \
             > android/app/keystore.jks
           echo "KEYSTORE_PATH=$PWD/android/app/keystore.jks" >> $GITHUB_ENV
-          echo "KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
-          echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> $GITHUB_ENV
-          echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> $GITHUB_ENV
+          echo "KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}"  >> $GITHUB_ENV
+          echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}"                  >> $GITHUB_ENV
+          echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}"            >> $GITHUB_ENV
+
       - name: Build Debug APK
         if: "!startsWith(github.ref, 'refs/tags/')"
         run: flutter build apk --debug --split-per-abi
+
       - name: Build Release APK
         if: startsWith(github.ref, 'refs/tags/')
         run: |
@@ -76,18 +106,21 @@ jobs:
             --split-per-abi \
             --obfuscate \
             --split-debug-info=build/debug-info/android/
+
       - name: Build Release AAB
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           flutter build appbundle --release \
             --obfuscate \
             --split-debug-info=build/debug-info/android/
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: android-apk-${{ github.sha }}
           path: build/app/outputs/flutter-apk/*.apk
           retention-days: 14
+
       - name: Upload AAB
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
@@ -95,6 +128,7 @@ jobs:
           name: android-aab-${{ github.sha }}
           path: build/app/outputs/bundle/release/*.aab
           retention-days: 30
+
       - name: Upload debug symbols
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
@@ -103,31 +137,52 @@ jobs:
           path: build/debug-info/android/
           retention-days: 90
 
-  # ── Windows EXE + Installer ─────────────────────────────────────────────────
+  # ── Windows EXE + Installer ──────────────────────────────────────────────────
   build-windows:
     name: 🪟 Windows (EXE + Installer)
     runs-on: windows-latest
     needs: analyze
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+
       - name: Enable Windows desktop
         run: flutter config --enable-windows-desktop
+
       - name: Get dependencies
         run: flutter pub get
+
       - name: Generate code
         run: dart run build_runner build --delete-conflicting-outputs
+
+      # ── pdfrx change #3 ─────────────────────────────────────────────────────
+      # pdfrx requires Windows Developer Mode to use symbolic links during its
+      # CMake build step.  GitHub Actions windows-latest runners already run
+      # with the SeCreateSymbolicLinkPrivilege granted to the runner account,
+      # so NO extra step is needed here — it works out of the box.
+      #
+      # If you ever switch to a self-hosted Windows runner you must enable
+      # Developer Mode or grant that privilege manually.
+
+      # ── pdfrx change #4 ─────────────────────────────────────────────────────
+      # Remove WASM modules before release builds (saves ~3 MB in the EXE).
+      - name: Remove WASM modules (release builds only)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: dart run pdfrx:remove_wasm_modules
+
       - name: Build Windows release
         shell: pwsh
         run: |
           flutter build windows --release `
             --obfuscate `
             --split-debug-info=build/debug-info/windows/
+
       - name: Package portable ZIP
         shell: pwsh
         run: |
@@ -135,10 +190,13 @@ jobs:
           $dst = "PDFEditor-Windows-Portable"
           New-Item -ItemType Directory -Path $dst -Force
           Copy-Item -Recurse "$src\*" "$dst\"
-          Compress-Archive -Path $dst -DestinationPath "PDFEditor-Portable-${{ github.ref_name }}.zip"
+          Compress-Archive -Path $dst `
+            -DestinationPath "PDFEditor-Portable-${{ github.ref_name }}.zip"
+
       - name: Install NSIS
         if: startsWith(github.ref, 'refs/tags/')
         run: choco install nsis -y --no-progress
+
       - name: Write NSIS script
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
@@ -192,15 +250,18 @@ jobs:
             DeleteRegKey HKCU "`${INST_KEY}"
           SectionEnd
           "@ | Out-File -FilePath installer.nsi -Encoding UTF8
+
       - name: Build installer
         if: startsWith(github.ref, 'refs/tags/')
         run: makensis installer.nsi
+
       - name: Upload portable ZIP
         uses: actions/upload-artifact@v4
         with:
           name: windows-portable-${{ github.sha }}
           path: PDFEditor-Portable-*.zip
           retention-days: 14
+
       - name: Upload installer
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
@@ -209,7 +270,7 @@ jobs:
           path: PDFEditor-Setup-*.exe
           retention-days: 30
 
-  # ── GitHub Release ───────────────────────────────────────────────────────────
+  # ── GitHub Release ────────────────────────────────────────────────────────────
   release:
     name: 🚀 Publish Release
     runs-on: ubuntu-latest
@@ -219,19 +280,22 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist/
+
       - name: List artifacts
         run: find dist/ -type f | sort
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "PDF Editor ${{ github.ref_name }}"
           body: |
             ## 📱 PDF Editor ${{ github.ref_name }}
-            A full-featured PDF editor for Android & Windows.
+            A full-featured PDF editor for Android & Windows, powered by PDFium.
             ### 🔧 Requirements
             - **Android**: 6.0+ (API 23)
             - **Windows**: Windows 10 64-bit or newer
