@@ -1,5 +1,5 @@
 name: pdf_editor
-description: A production-grade PDF editor for Android & Windows
+description: A production-grade PDF editor for Android & Windows, powered by PDFium via pdfrx
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -10,28 +10,30 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # ── PDF rendering & editing ──────────────────────────────────────────────
-  syncfusion_flutter_pdfviewer: ^26.1.35  # PDF rendering in viewer widget
-  syncfusion_flutter_pdf: ^26.1.35        # PDF read/write for saving annotations
+  # ── PDF rendering & editing (PDFium) ─────────────────────────────────────
+  # pdfrx wraps Google PDFium for rendering, text extraction (with exact
+  # glyph-level bounds), and saving.  It replaces both
+  # syncfusion_flutter_pdfviewer and syncfusion_flutter_pdf.
+  pdfrx: ^2.2.24
 
-  # ── File system ──────────────────────────────────────────────────────────
-  file_picker: ^8.0.3          # Native file browser (Android + Windows)
-  path_provider: ^2.1.3        # App documents / cache directories
-  permission_handler: ^11.3.1  # Android storage permissions
+  # ── File system ───────────────────────────────────────────────────────────
+  file_picker: ^8.0.3
+  path_provider: ^2.1.3
+  permission_handler: ^11.3.1
 
-  # ── State management ─────────────────────────────────────────────────────
+  # ── State management ──────────────────────────────────────────────────────
   flutter_riverpod: ^2.5.1
   riverpod_annotation: ^2.3.5
 
   # ── UI / UX ───────────────────────────────────────────────────────────────
-  flutter_colorpicker: ^1.1.0  # Color picker dialog
-  google_fonts: ^6.2.1         # Inter font
+  flutter_colorpicker: ^1.1.0
+  google_fonts: ^6.2.1
 
   # ── Utilities ─────────────────────────────────────────────────────────────
   uuid: ^4.4.0
   freezed_annotation: ^2.4.1
   json_annotation: ^4.9.0
-  share_plus: ^9.0.0           # System share sheet
+  share_plus: ^9.0.0
 
 dev_dependencies:
   flutter_test:

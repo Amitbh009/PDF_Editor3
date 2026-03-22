@@ -3,10 +3,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pdfrx/pdfrx.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 
 import '../providers/pdf_provider.dart';
+import '../services/pdf_service.dart';
 import '../widgets/annotation_overlay.dart';
 import '../widgets/annotations_list.dart';
 import '../widgets/editor_toolbar.dart';
@@ -22,11 +23,13 @@ class EditorScreen extends ConsumerStatefulWidget {
 }
 
 class _EditorScreenState extends ConsumerState<EditorScreen> {
+  // pdfrx controller — replaces SfPdfViewerController
   final PdfViewerController _pdfController = PdfViewerController();
-  bool _showPropertiesPanel  = false;
-  bool _showThumbnails       = false;
-  bool _showAnnotationsList  = false;
-  bool _isSaving             = false;
+
+  bool _showPropertiesPanel = false;
+  bool _showThumbnails      = false;
+  bool _showAnnotationsList = false;
+  bool _isSaving            = false;
 
   @override
   void dispose() {
@@ -34,30 +37,53 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     super.dispose();
   }
 
+  // ── Save ───────────────────────────────────────────────────────────────────
+
   Future<void> _saveDocument() async {
     final doc = ref.read(currentDocumentProvider);
     if (doc == null) return;
 
-    // Capture before any await to satisfy use_build_context_synchronously
     final messenger  = ScaffoldMessenger.of(context);
     final errorColor = Theme.of(context).colorScheme.error;
 
     setState(() => _isSaving = true);
     try {
-      final dir = await getApplicationDocumentsDirectory();
-      final ts  = DateTime.now().millisecondsSinceEpoch;
+      final dir        = await getApplicationDocumentsDirectory();
+      final ts         = DateTime.now().millisecondsSinceEpoch;
       final outputPath = '${dir.path}/edited_${ts}_${doc.fileName}';
 
-      await ref
-          .read(currentDocumentProvider.notifier)
-          .saveDocument(outputPath);
+      // Collect all text block edits made by the user
+      final editedBlocks =
+          ref.read(textBlockNotifierProvider.notifier).editedBlocks;
+
+      // Fetch any page heights not yet in cache (needed for Y-axis flipping)
+      final cachedHeights =
+          Map<int, double>.from(ref.read(pageHeightCacheProvider));
+      final service = ref.read(pdfServiceProvider);
+
+      final neededPages = {
+        ...editedBlocks.map((b) => b.pageNumber),
+        ...doc.annotations.map((a) => a.pageNumber),
+      };
+      for (final p in neededPages) {
+        if (!cachedHeights.containsKey(p)) {
+          final size = await service.getPageSize(doc.filePath, p);
+          cachedHeights[p] = size.height;
+        }
+      }
+
+      await ref.read(currentDocumentProvider.notifier).saveDocument(
+            outputPath,
+            editedTextBlocks: editedBlocks,
+            pageHeights:      cachedHeights,
+          );
 
       messenger.showSnackBar(
         SnackBar(
-          content: const Text('PDF saved successfully'),
+          content:  const Text('PDF saved successfully'),
           behavior: SnackBarBehavior.floating,
           action: SnackBarAction(
-            label: 'Share',
+            label:     'Share',
             onPressed: () => Share.shareXFiles(
               [XFile(outputPath)],
               subject: 'Edited PDF',
@@ -68,9 +94,9 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     } catch (e) {
       messenger.showSnackBar(
         SnackBar(
-          content: Text('Save failed: $e'),
+          content:         Text('Save failed: $e'),
           backgroundColor: errorColor,
-          behavior: SnackBarBehavior.floating,
+          behavior:        SnackBarBehavior.floating,
         ),
       );
     } finally {
@@ -79,12 +105,14 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
   }
 
   void _handleSave() {
-    final doc = ref.read(currentDocumentProvider);
+    final doc          = ref.read(currentDocumentProvider);
+    final hasTextEdits = ref.read(textBlockNotifierProvider.notifier).hasEdits;
     if (doc == null) return;
-    if (!doc.isModified) {
+
+    if (!doc.isModified && !hasTextEdits) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('No unsaved changes'),
+          content:  Text('No unsaved changes'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -97,9 +125,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     showDialog<void>(
       context: ctx,
       builder: (_) => AlertDialog(
-        title: const Text('Unsaved changes'),
-        content: const Text(
-            'You have unsaved changes. Save before leaving?'),
+        title:   const Text('Unsaved changes'),
+        content: const Text('You have unsaved changes. Save before leaving?'),
         actions: [
           TextButton(
             onPressed: () {
@@ -120,18 +147,19 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     );
   }
 
+  // ── Build ──────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    final doc = ref.watch(currentDocumentProvider);
+    final doc   = ref.watch(currentDocumentProvider);
+    final theme = Theme.of(context);
+
     if (doc == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('PDF Editor')),
         body: const Center(child: Text('No document open')),
       );
     }
-
-    final theme = Theme.of(context);
-
 
     return PopScope(
       canPop: !doc.isModified,
@@ -142,11 +170,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
         appBar: AppBar(
           title: Row(
             children: [
-              Icon(
-                Icons.picture_as_pdf_rounded,
-                color: theme.colorScheme.primary,
-                size: 20,
-              ),
+              Icon(Icons.picture_as_pdf_rounded,
+                  color: theme.colorScheme.primary, size: 20),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -158,18 +183,18 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
               ),
               if (doc.isModified)
                 Container(
-                  margin: const EdgeInsets.only(left: 6),
+                  margin:  const EdgeInsets.only(left: 6),
                   padding: const EdgeInsets.symmetric(
                       horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.errorContainer,
+                    color:        theme.colorScheme.errorContainer,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     'Modified',
                     style: TextStyle(
-                      fontSize: 10,
-                      color: theme.colorScheme.error,
+                      fontSize:   10,
+                      color:      theme.colorScheme.error,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -178,29 +203,27 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
           ),
           actions: [
             IconButton(
-              icon: Icon(
-                _showThumbnails
-                    ? Icons.view_list_rounded
-                    : Icons.grid_view_rounded,
-              ),
+              icon: Icon(_showThumbnails
+                  ? Icons.view_list_rounded
+                  : Icons.grid_view_rounded),
               onPressed: () =>
                   setState(() => _showThumbnails = !_showThumbnails),
               tooltip: 'Page thumbnails',
             ),
             IconButton(
-              icon: const Icon(Icons.layers_rounded),
+              icon:      const Icon(Icons.layers_rounded),
               onPressed: () => setState(
                   () => _showAnnotationsList = !_showAnnotationsList),
               tooltip: 'Annotations',
             ),
             IconButton(
-              icon: const Icon(Icons.tune_rounded),
+              icon:      const Icon(Icons.tune_rounded),
               onPressed: () => setState(
                   () => _showPropertiesPanel = !_showPropertiesPanel),
               tooltip: 'Properties',
             ),
             IconButton(
-              icon: const Icon(Icons.share_rounded),
+              icon:      const Icon(Icons.share_rounded),
               onPressed: () => Share.shareXFiles(
                 [XFile(doc.filePath)],
                 subject: doc.fileName,
@@ -212,14 +235,14 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
                 ? const Padding(
                     padding: EdgeInsets.all(12),
                     child: SizedBox(
-                      width: 20,
+                      width:  20,
                       height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                      child:  CircularProgressIndicator(strokeWidth: 2),
                     ),
                   )
                 : FilledButton.icon(
                     onPressed: _handleSave,
-                    icon: const Icon(Icons.save_rounded, size: 18),
+                    icon:  const Icon(Icons.save_rounded, size: 18),
                     label: const Text('Save'),
                     style: FilledButton.styleFrom(
                       padding: const EdgeInsets.symmetric(
@@ -235,55 +258,90 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
             Expanded(
               child: Row(
                 children: [
+                  // ── Left: page thumbnails ──────────────────────────────
                   if (_showThumbnails)
                     SizedBox(
                       width: 100,
                       child: ThumbnailPanel(
-                        filePath: doc.filePath,
-                        totalPages: doc.totalPages,
+                        filePath:    doc.filePath,
+                        totalPages:  doc.totalPages,
                         currentPage: doc.currentPage,
-                        onPageTap: (page) =>
-                            _pdfController.jumpToPage(page),
+                        onPageTap:   (page) =>
+                            _pdfController.goToPage(pageNumber: page),
                       ),
                     ),
+
+                  // ── Centre: PDF viewer + overlay ───────────────────────
                   Expanded(
                     child: Stack(
                       children: [
-                        SfPdfViewer.file(
-                          File(doc.filePath),
+                        // pdfrx PdfViewer replaces SfPdfViewer
+                        PdfViewer.file(
+                          doc.filePath,
                           controller: _pdfController,
-                          enableDoubleTapZooming: true,
-                          pageLayoutMode: PdfPageLayoutMode.single,
-                          canShowScrollHead: true,
-                          canShowScrollStatus: true,
-                          onPageChanged: (details) {
-                            ref
-                                .read(currentDocumentProvider.notifier)
-                                .setPage(details.newPageNumber);
-                          },
+                          params: PdfViewerParams(
+                            // Single-page layout matches original behaviour
+                            layoutPages: (pages, params) =>
+                                PdfPageLayout.singlePage(pages, params),
+
+                            // Cache exact page dimensions once document loads.
+                            // These are used for:
+                            //   1. Computing the overlay scale factor
+                            //   2. Y-axis coordinate flipping on save
+                            onDocumentChanged: (document) async {
+                              if (document == null) return;
+                              final service = ref.read(pdfServiceProvider);
+                              final heights = <int, double>{};
+                              final widths  = <int, double>{};
+                              for (int p = 1;
+                                  p <= document.pages.length;
+                                  p++) {
+                                final size = await service.getPageSize(
+                                    doc.filePath, p);
+                                heights[p] = size.height;
+                                widths[p]  = size.width;
+                              }
+                              ref
+                                  .read(pageHeightCacheProvider.notifier)
+                                  .state = heights;
+                              ref
+                                  .read(pageWidthCacheProvider.notifier)
+                                  .state = widths;
+                            },
+
+                            // Track current page for the overlay & navigator
+                            onPageChanged: (pageNumber) {
+                              if (pageNumber == null) return;
+                              ref
+                                  .read(currentDocumentProvider.notifier)
+                                  .setPage(pageNumber);
+                            },
+                          ),
                         ),
-                        AnnotationOverlay(
-                            pdfController: _pdfController),
+
+                        // Transparent annotation + text-edit overlay
+                        AnnotationOverlay(controller: _pdfController),
                       ],
                     ),
                   ),
+
+                  // ── Right panels ───────────────────────────────────────
                   if (_showAnnotationsList)
                     const SizedBox(
-                      width: 260,
-                      child: AnnotationsList(),
-                    ),
+                        width: 260, child: AnnotationsList()),
                   if (_showPropertiesPanel)
                     const SizedBox(
-                      width: 280,
-                      child: PropertiesPanel(),
-                    ),
+                        width: 280, child: PropertiesPanel()),
                 ],
               ),
             ),
+
+            // ── Bottom: page navigator ─────────────────────────────────
             PageNavigator(
-              currentPage: doc.currentPage,
-              totalPages: doc.totalPages,
-              onPageChanged: (page) => _pdfController.jumpToPage(page),
+              currentPage:   doc.currentPage,
+              totalPages:    doc.totalPages,
+              onPageChanged: (page) =>
+                  _pdfController.goToPage(pageNumber: page),
             ),
           ],
         ),

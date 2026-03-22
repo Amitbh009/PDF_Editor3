@@ -6,20 +6,24 @@ import 'package:uuid/uuid.dart';
 
 import '../models/annotation_model.dart';
 import '../models/pdf_document_model.dart';
+import '../models/pdf_text_block.dart';
 import '../services/pdf_service.dart';
 
 const _uuid = Uuid();
 
 // ─── Document provider ────────────────────────────────────────────────────────
+
 final currentDocumentProvider =
     StateNotifierProvider<DocumentNotifier, PdfDocumentModel?>(
   (ref) => DocumentNotifier(ref.watch(pdfServiceProvider)),
 );
 
 // ─── Tool enum ────────────────────────────────────────────────────────────────
+
 enum EditorTool {
   select,
-  text,
+  editText,       // ← Click existing PDF text to edit Word-style (PDFium-backed)
+  text,           // Add new text annotation
   highlight,
   underline,
   strikethrough,
@@ -30,24 +34,77 @@ enum EditorTool {
   eraser,
 }
 
-// ─── Style / tool providers ───────────────────────────────────────────────────
+// ─── Style providers ──────────────────────────────────────────────────────────
+
 final selectedToolProvider =
     StateProvider<EditorTool>((ref) => EditorTool.select);
-final selectedColorProvider = StateProvider<int>((ref) => 0xFF000000);
-final strokeWidthProvider   = StateProvider<double>((ref) => 2.0);
-final fontSizeProvider      = StateProvider<double>((ref) => 14.0);
-final opacityProvider       = StateProvider<double>((ref) => 1.0);
-final zoomLevelProvider     = StateProvider<double>((ref) => 1.0);
-final isBoldProvider        = StateProvider<bool>((ref) => false);
-final isItalicProvider      = StateProvider<bool>((ref) => false);
-
-/// The ID of the annotation currently selected with the Select tool.
+final selectedColorProvider  = StateProvider<int>((ref) => 0xFF000000);
+final strokeWidthProvider    = StateProvider<double>((ref) => 2.0);
+final fontSizeProvider       = StateProvider<double>((ref) => 14.0);
+final opacityProvider        = StateProvider<double>((ref) => 1.0);
+final zoomLevelProvider      = StateProvider<double>((ref) => 1.0);
+final isBoldProvider         = StateProvider<bool>((ref) => false);
+final isItalicProvider       = StateProvider<bool>((ref) => false);
 final selectedAnnotationIdProvider = StateProvider<String?>((ref) => null);
 
-// ─── History availability providers ──────────────────────────────────────────
+// ─── Page size cache (PDF points) ────────────────────────────────────────────
+// Populated by EditorScreen once onDocumentLoaded fires, giving us the true
+// PDFium page dimensions for exact coordinate conversion.
+
+final pageWidthCacheProvider  = StateProvider<Map<int, double>>((ref) => {});
+final pageHeightCacheProvider = StateProvider<Map<int, double>>((ref) => {});
+
+// ─── Text-block state (PDFium-extracted) ──────────────────────────────────────
+
+final textBlockNotifierProvider =
+    StateNotifierProvider<TextBlockNotifier, List<PdfTextBlock>>(
+  (ref) => TextBlockNotifier(ref.watch(pdfServiceProvider)),
+);
+
+class TextBlockNotifier extends StateNotifier<List<PdfTextBlock>> {
+  TextBlockNotifier(this._service) : super([]);
+
+  final PdfService _service;
+
+  /// Extract text blocks for [page] from [filePath] via PDFium.
+  Future<void> load(String filePath, int page) async {
+    final blocks = await _service.extractTextBlocks(filePath, page);
+    state = blocks;
+  }
+
+  /// Recalculate screen-space rects when the viewer zoom changes.
+  /// [scale] = screen pixels per PDF point.
+  void applyScale(double scale) {
+    if (scale <= 0) return;
+    state = state.map((b) => b.withScreenRect(
+          b.pdfRect.scale(scale, scale),
+        )).toList();
+  }
+
+  /// Commit an in-place text edit.
+  void updateBlock(String id, String newText) {
+    state = state.map((b) {
+      if (b.id != id) return b;
+      b.editedText = newText;
+      b.isEdited   = newText != b.originalText;
+      return b;
+    }).toList();
+    // Notify Riverpod that the list changed
+    state = List.from(state);
+  }
+
+  void clear() => state = [];
+
+  List<PdfTextBlock> get editedBlocks =>
+      state.where((b) => b.isEdited).toList();
+
+  bool get hasEdits => state.any((b) => b.isEdited);
+}
+
+// ─── Undo/redo availability ───────────────────────────────────────────────────
+
 final canUndoProvider = Provider<bool>((ref) {
   final notifier = ref.watch(currentDocumentProvider.notifier);
-  // watch document changes to rebuild
   ref.watch(currentDocumentProvider);
   return notifier.canUndo;
 });
@@ -59,19 +116,18 @@ final canRedoProvider = Provider<bool>((ref) {
 });
 
 // ─── Document notifier ────────────────────────────────────────────────────────
+
 class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
   DocumentNotifier(this._pdfService) : super(null);
 
   final PdfService _pdfService;
 
-  // ── History stacks ────────────────────────────────────────────────────────
   final List<List<AnnotationModel>> _undoStack = [];
   final List<List<AnnotationModel>> _redoStack = [];
 
   bool get canUndo => _undoStack.isNotEmpty;
   bool get canRedo => _redoStack.isNotEmpty;
 
-  /// Save a snapshot BEFORE a mutating operation.
   void _snapshot() {
     if (state == null) return;
     _undoStack.add(List<AnnotationModel>.from(state!.annotations));
@@ -81,10 +137,9 @@ class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
   void undo() {
     if (state == null || _undoStack.isEmpty) return;
     _redoStack.add(List<AnnotationModel>.from(state!.annotations));
-    final prev = _undoStack.removeLast();
     state = state!.copyWith(
-      annotations: List<AnnotationModel>.from(prev),
-      isModified: true,
+      annotations:  List<AnnotationModel>.from(_undoStack.removeLast()),
+      isModified:   true,
       lastModified: DateTime.now(),
     );
   }
@@ -92,35 +147,32 @@ class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
   void redo() {
     if (state == null || _redoStack.isEmpty) return;
     _undoStack.add(List<AnnotationModel>.from(state!.annotations));
-    final next = _redoStack.removeLast();
     state = state!.copyWith(
-      annotations: List<AnnotationModel>.from(next),
-      isModified: true,
+      annotations:  List<AnnotationModel>.from(_redoStack.removeLast()),
+      isModified:   true,
       lastModified: DateTime.now(),
     );
   }
 
-  // ── Document lifecycle ────────────────────────────────────────────────────
   Future<void> openDocument(String filePath) async {
     _undoStack.clear();
     _redoStack.clear();
     final pageCount = await _pdfService.getPageCount(filePath);
     state = PdfDocumentModel(
-      id: _uuid.v4(),
-      filePath: filePath,
-      fileName: filePath.split(Platform.pathSeparator).last,
-      totalPages: pageCount,
+      id:           _uuid.v4(),
+      filePath:     filePath,
+      fileName:     filePath.split(Platform.pathSeparator).last,
+      totalPages:   pageCount,
       lastModified: DateTime.now(),
     );
   }
 
-  // ── CRUD ──────────────────────────────────────────────────────────────────
   void addAnnotation(AnnotationModel annotation) {
     if (state == null) return;
     _snapshot();
     state = state!.copyWith(
-      annotations: [...state!.annotations, annotation],
-      isModified: true,
+      annotations:  [...state!.annotations, annotation],
+      isModified:   true,
       lastModified: DateTime.now(),
     );
   }
@@ -132,7 +184,7 @@ class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
       annotations: state!.annotations
           .map((a) => a.id == annotation.id ? annotation : a)
           .toList(),
-      isModified: true,
+      isModified:   true,
       lastModified: DateTime.now(),
     );
   }
@@ -141,8 +193,8 @@ class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
     if (state == null) return;
     _snapshot();
     state = state!.copyWith(
-      annotations: state!.annotations.where((a) => a.id != id).toList(),
-      isModified: true,
+      annotations:  state!.annotations.where((a) => a.id != id).toList(),
+      isModified:   true,
       lastModified: DateTime.now(),
     );
   }
@@ -169,7 +221,11 @@ class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
     state = state!.copyWith(currentPage: page);
   }
 
-  // ── Live drag (no undo snapshot — called every frame) ─────────────────────
+  void markModified() {
+    if (state == null) return;
+    state = state!.copyWith(isModified: true, lastModified: DateTime.now());
+  }
+
   void moveAnnotationLive(String id, Offset delta) {
     if (state == null) return;
     state = state!.copyWith(
@@ -181,16 +237,20 @@ class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
     );
   }
 
-  /// Call this BEFORE starting a live drag to save a proper undo point.
   void snapshotForDrag() => _snapshot();
 
-  // ── Save ─────────────────────────────────────────────────────────────────
-  Future<String> saveDocument(String outputPath) async {
+  Future<String> saveDocument(
+    String outputPath, {
+    List<PdfTextBlock> editedTextBlocks = const [],
+    Map<int, double>   pageHeights      = const {},
+  }) async {
     if (state == null) throw Exception('No document open');
     await _pdfService.saveWithAnnotations(
       state!.filePath,
       state!.annotations,
       outputPath,
+      editedTextBlocks: editedTextBlocks,
+      pageHeights:      pageHeights,
     );
     state = state!.copyWith(isModified: false);
     return outputPath;
