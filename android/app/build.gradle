@@ -6,8 +6,14 @@ plugins {
 
 android {
     namespace "com.pdfeditor.app"
-    compileSdk 35
-    ndkVersion flutter.ndkVersion
+    compileSdk 36
+
+    // FIX: Pin NDK version explicitly instead of using flutter.ndkVersion.
+    // flutter.ndkVersion varies by Flutter version and CI image.
+    // NDK 27.0.12077973 is required by pdfrx, permission_handler, and
+    // path_provider_android. Pinning here prevents the mismatch error:
+    //   "Your project is configured with NDK X but plugin Y requires NDK 27"
+    ndkVersion "27.0.12077973"
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -21,7 +27,7 @@ android {
     defaultConfig {
         applicationId "com.pdfeditor.app"
         minSdk 23
-        targetSdk 35
+        targetSdk 36
         versionCode flutter.versionCode
         versionName flutter.versionName
         multiDexEnabled true
@@ -63,6 +69,9 @@ flutter {
 }
 
 dependencies {
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.10"
+    // FIX: Updated Kotlin stdlib from 1.9.10 to 2.1.0 to match
+    // settings.gradle kotlin plugin version. Mismatched versions cause:
+    //   "Kotlin stdlib version mismatch" compile error.
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.1.0"
     implementation "androidx.multidex:multidex:2.0.1"
 }
