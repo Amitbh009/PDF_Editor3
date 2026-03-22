@@ -305,4 +305,4 @@ jobs:
             dist/**/*.apk
             dist/**/*.aab
             dist/**/*.exe
-            dist/**/*.zip
+            dist/**/*.zip 
