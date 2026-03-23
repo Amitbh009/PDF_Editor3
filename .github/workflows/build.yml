@@ -16,7 +16,7 @@ on:
 # ─────────────────────────────────────────────────────────────────────────────
 env:
   # Latest Flutter stable as of March 2026.
-  # Flutter 3.41 ships with Dart 3.7, AGP 8.7 support, NDK 27.
+  # Flutter 3.41 ships with Dart 3.7, AGP 8.9 support, NDK 27.
   # DO NOT use 3.29.x — pdfrx 2.2+ requires Dart 3.7 / Flutter 3.41+.
   FLUTTER_VERSION: '3.41.2'
   JAVA_VERSION: '17'

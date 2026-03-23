@@ -19,17 +19,23 @@ pluginManagement {
 plugins {
     id "dev.flutter.flutter-plugin-loader" version "1.0.0"
 
-    // FIX: AGP updated from 8.3.0 → 8.7.3
-    // 8.3.0 is incompatible with Gradle 8.12 and NDK 27.
-    // 8.7.3 is the latest stable AGP that works with Flutter 3.41,
-    // Gradle 8.12, and NDK 27. DO NOT upgrade to AGP 9.x —
-    // Flutter 3.41 does not yet support AGP 9 (flutter/flutter#181383).
-    id "com.android.application" version "8.7.3" apply false
-
-    // FIX: Kotlin updated from 1.9.10 → 2.1.0
-    // Flutter 3.41 requires Kotlin 2.x for its Gradle plugin.
-    // Using 1.9.10 with AGP 8.7 causes:
-    //   "Kotlin stdlib version mismatch" errors.
+    // FIX: AGP updated from 8.7.3 → 8.9.1
+    //
+    // ROOT CAUSE of the build failure:
+    //   androidx.browser:1.9.0, androidx.core:1.17.0, androidx.core-ktx:1.17.0
+    //   all embed an AAR metadata field that declares they require AGP >= 8.9.1.
+    //   Flutter's plugin dependencies pull these AndroidX versions transitively.
+    //   AGP 8.7.3 rejects them at :app:checkDebugAarMetadata with:
+    //   "Dependency '...' requires Android Gradle plugin 8.9.1 or higher."
+    //
+    // WHY 8.9.1 and not higher:
+    //   • AGP 9.x is explicitly NOT supported by Flutter 3.41 yet
+    //     (flutter/flutter#181383) — using it causes plugin breakage.
+    //   • AGP 8.9.1 is the minimum that satisfies all dependency requirements
+    //     while remaining fully compatible with Flutter 3.41.
+    //
+    // Kotlin stays at 2.1.0 — already correct for AGP 8.9.
+    id "com.android.application" version "8.9.1" apply false
     id "org.jetbrains.kotlin.android" version "2.1.0" apply false
 }
 
