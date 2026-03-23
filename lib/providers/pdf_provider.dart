@@ -34,7 +34,7 @@ enum EditorTool {
 
 // ── Style providers ───────────────────────────────────────────────────────────
 final selectedToolProvider     = StateProvider<EditorTool>((ref) => EditorTool.select);
-final selectedColorProvider    = StateProvider<int>((ref) => 0xFF000000);
+final selectedColorProvider    = StateProvider<int>((ref) => 0xFFFF0000);
 final strokeWidthProvider      = StateProvider<double>((ref) => 2.0);
 final fontSizeProvider         = StateProvider<double>((ref) => 14.0);
 final opacityProvider          = StateProvider<double>((ref) => 1.0);
