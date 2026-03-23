@@ -1014,7 +1014,7 @@ class _AnnotationPainter extends CustomPainter {
     if (freehandPoints.length > 1) {
       final path = Path()
         ..moveTo(freehandPoints.first.dx, freehandPoints.first.dy);
-      for (final p in freehandPoints.skip(1)) path.lineTo(p.dx, p.dy);
+      for (final p in freehandPoints.skip(1)) { path.lineTo(p.dx, p.dy); }
       canvas.drawPath(path, prevPaint);
     }
   }

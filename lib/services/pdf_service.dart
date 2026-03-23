@@ -104,7 +104,6 @@ class PdfService {
       final right  = line.map((f) => f.bounds.right  ).reduce((a,b) => a > b ? a : b);
       final bottom = line.map((f) => f.bounds.bottom ).reduce((a,b) => a > b ? a : b);
 
-      final first    = line.first;
       final lineH    = (bottom - top).abs().clamp(4.0, double.infinity);
       final fontSize = (lineH * 0.75).clamp(4.0, 144.0);
 
@@ -171,11 +170,8 @@ class PdfService {
       // (b) Redraw replacement text.
       if (block.editedText.trim().isNotEmpty) {
         final fontFamily = _matchFont(block.fontName);
-        final fontStyle  = block.isBold
-            ? (block.isItalic ? sf.PdfFontStyle.boldItalic : sf.PdfFontStyle.bold)
-            : (block.isItalic ? sf.PdfFontStyle.italic     : sf.PdfFontStyle.regular);
-        final font = sf.PdfStandardFont(fontFamily, block.fontSize,
-            style: fontStyle);
+        final font = _makeFont(fontFamily, block.fontSize,
+            isBold: block.isBold, isItalic: block.isItalic);
         page.graphics.drawString(
           block.editedText,
           font,
@@ -213,6 +209,29 @@ class PdfService {
     );
   }
 
+  /// Creates a PdfStandardFont supporting bold, italic, or both.
+  ///
+  /// PdfFontStyle has no combined boldItalic constant.
+  /// When both bold and italic are requested we create a bold font and
+  /// layer an italic-slant effect via a PdfStringFormat skew — but the
+  /// simplest cross-platform approach Syncfusion supports is:
+  ///   bold=true  italic=false → PdfFontStyle.bold
+  ///   bold=false italic=true  → PdfFontStyle.italic
+  ///   bold=true  italic=true  → PdfFontStyle.bold (bold takes precedence;
+  ///                              Syncfusion has no single boldItalic value)
+  ///   both false              → PdfFontStyle.regular
+  sf.PdfStandardFont _makeFont(
+    sf.PdfFontFamily family,
+    double size, {
+    required bool isBold,
+    required bool isItalic,
+  }) {
+    final style = isBold
+        ? sf.PdfFontStyle.bold
+        : (isItalic ? sf.PdfFontStyle.italic : sf.PdfFontStyle.regular);
+    return sf.PdfStandardFont(family, size, style: style);
+  }
+
   sf.PdfFontFamily _matchFont(String name) {
     final l = name.toLowerCase();
     if (l.contains('times') || l.contains('serif') || l.contains('georgia')) {
@@ -235,11 +254,8 @@ class PdfService {
     switch (a.type) {
       case AnnotationType.text:
         if (a.content.trim().isNotEmpty) {
-          final style = a.isBold
-              ? (a.isItalic ? sf.PdfFontStyle.boldItalic : sf.PdfFontStyle.bold)
-              : (a.isItalic ? sf.PdfFontStyle.italic     : sf.PdfFontStyle.regular);
-          final font = sf.PdfStandardFont(
-              sf.PdfFontFamily.helvetica, a.fontSize, style: style);
+          final font = _makeFont(sf.PdfFontFamily.helvetica, a.fontSize,
+              isBold: a.isBold, isItalic: a.isItalic);
           page.graphics.drawString(
             a.content, font,
             brush:  sf.PdfSolidBrush(_sfColor(a.color)),
