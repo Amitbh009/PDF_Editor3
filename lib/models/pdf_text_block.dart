@@ -1,23 +1,22 @@
 import 'dart:ui' show Rect;
 
-/// A single line of existing text extracted from a PDF page via PDFium.
+/// A single line of text extracted from a PDF page via PDFium (pdfrx).
 ///
-/// PDFium gives us:
-///   • Exact glyph-level character bounds (not estimated from line height)
-///   • Font name as embedded in the PDF
-///   • Font size in PDF points
-///   • Font flags (bold / italic)
-///
-/// Coordinates use two systems:
-///   [pdfRect]    — PDF-point space, origin top-left (from PdfPageText.fragments)
-///   [screenRect] — Screen-pixel space, computed via [applyScale]
+/// Coordinates:
+///   [pdfLeft], [pdfTop], [pdfRight], [pdfBottom] — PDF-point space
+///     (pdfrx PdfPageTextFragment.bounds uses top-left origin, Y grows DOWN).
+///   [screenRect] — screen-pixel space, set by [withScreenRect] after the
+///     viewer reports its scale factor.
 class PdfTextBlock {
   PdfTextBlock({
     required this.id,
     required this.pageNumber,
     required this.originalText,
     required this.editedText,
-    required this.pdfRect,   // in PDF points, origin top-left Y-down
+    required this.pdfLeft,
+    required this.pdfTop,
+    required this.pdfRight,
+    required this.pdfBottom,
     required this.screenRect,
     required this.fontSize,
     required this.fontName,
@@ -29,37 +28,42 @@ class PdfTextBlock {
 
   final String id;
   final int    pageNumber;
-
-  /// Text as it exists in the original PDF.
   final String originalText;
+  String       editedText;
 
-  /// User-edited replacement text (starts equal to [originalText]).
-  String editedText;
+  // PDF-point coordinates (top-left origin, Y grows down — as returned by
+  // pdfrx PdfRect after converting via pdfRectToFlutterRect).
+  final double pdfLeft;
+  final double pdfTop;
+  final double pdfRight;
+  final double pdfBottom;
 
-  /// Bounding rect in PDF-point space (origin top-left, Y grows DOWN).
-  /// This is what pdfrx's PdfPageText uses — no Y-flip needed for extraction.
-  final Rect pdfRect;
+  double get pdfWidth  => pdfRight  - pdfLeft;
+  double get pdfHeight => pdfBottom - pdfTop;
 
-  /// Bounding rect in screen-pixel space, set by [applyScale].
+  /// The dart:ui Rect that covers this block in PDF-point space.
+  Rect get pdfRect => Rect.fromLTRB(pdfLeft, pdfTop, pdfRight, pdfBottom);
+
+  /// Screen-pixel rect, updated via [withScreenRect] when zoom changes.
   Rect screenRect;
 
-  // ── Text style (from PDFium glyph metadata) ──────────────────────────────
   final double fontSize;
   final String fontName;
   final bool   isBold;
   final bool   isItalic;
   final int    colorArgb;
 
-  /// True when [editedText] differs from [originalText].
   bool isEdited;
 
-  /// Return a copy with new screen rect (used when zoom level changes).
   PdfTextBlock withScreenRect(Rect rect) => PdfTextBlock(
         id:           id,
         pageNumber:   pageNumber,
         originalText: originalText,
         editedText:   editedText,
-        pdfRect:      pdfRect,
+        pdfLeft:      pdfLeft,
+        pdfTop:       pdfTop,
+        pdfRight:     pdfRight,
+        pdfBottom:    pdfBottom,
         screenRect:   rect,
         fontSize:     fontSize,
         fontName:     fontName,

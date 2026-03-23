@@ -1,36 +1,21 @@
+# analysis_options.yaml — dart analyzer configuration
+
 include: package:flutter_lints/flutter.yaml
 
-linter:
-  rules:
-    # Style
-    prefer_const_constructors: true
-    prefer_const_literals_to_create_immutables: true
-    prefer_final_fields: true
-    prefer_final_locals: true
-    unnecessary_const: true
-    unnecessary_new: true
-    use_super_parameters: true
-    sized_box_for_whitespace: true
-    avoid_unnecessary_containers: true
-
-    # Safety
-    avoid_print: true
-    cancel_subscriptions: true
-    close_sinks: true
-    avoid_catching_errors: true
-    unawaited_futures: true
-
-    # Dart style
-    sort_constructors_first: true
-    always_declare_return_types: true
-    annotate_overrides: true
-
 analyzer:
+  # Exclude generated Freezed files and any backup/patch folders that
+  # may exist inside the project directory from previous migrations.
   exclude:
     - "**/*.g.dart"
     - "**/*.freezed.dart"
-    - lib/generated/**
-  errors:
-    invalid_annotation_target: ignore
-    deprecated_member_use: ignore
-    deprecated_member_use_from_same_package: ignore
+    - "backup_*/**"
+    - "**/backup_before_patch*/**"
+    - "**/backup_*/**"
+
+linter:
+  rules:
+    # Enforce await on unawaited futures
+    unawaited_futures: true
+    # Prefer const constructors
+    prefer_const_constructors: true
+    prefer_const_declarations: true

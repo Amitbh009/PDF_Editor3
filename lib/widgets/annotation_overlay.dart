@@ -54,6 +54,7 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
   // ── Scale factor (screen pixels per PDF point) ────────────────────────────
   // Updated from the PdfViewerController every build.
   double _scale = 1.0;
+  double _lastKnownWidth = 0.0;
 
   @override
   void initState() {
@@ -72,25 +73,14 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
 
   // ── Scale & block loading ─────────────────────────────────────────────────
 
-  /// Read the exact scale from the pdfrx controller.
-  /// [PdfViewerController.pages] gives rendered page rects in screen pixels.
-  /// [PdfPage.width] gives PDF-point width.
-  /// scale = renderedWidthPx / pdfWidthPt
-  double _computeScale(int pageNumber) {
-    try {
-      final pages = widget.controller.pages;
-      if (pages == null || pages.isEmpty) return _scale;
-      final idx = (pageNumber - 1).clamp(0, pages.length - 1);
-      final rendered = pages[idx]; // PdfPageLayout with rect in screen pixels
-      final doc = ref.read(currentDocumentProvider);
-      if (doc == null) return _scale;
-      final widthCache = ref.read(pageWidthCacheProvider);
-      final pdfW = widthCache[pageNumber];
-      if (pdfW == null || pdfW <= 0) return _scale;
-      return rendered.rect.width / pdfW;
-    } catch (_) {
-      return _scale;
-    }
+  /// Compute scale from the cached page width.
+  /// scale = current overlay widget width (px) / PDF page width (pts).
+  /// The overlay fills the same width as PdfViewer in single-page mode.
+  double _computeScaleFromCache(int pageNumber, double widgetWidth) {
+    final pdfW = ref.read(pageWidthCacheProvider)[pageNumber];
+    if (pdfW == null || pdfW <= 0) return _scale;
+    final s = widgetWidth / pdfW;
+    return s > 0 ? s : _scale;
   }
 
   Future<void> _loadBlocks() async {
@@ -102,10 +92,12 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
     _updateScale();
   }
 
-  void _updateScale() {
+  void _updateScale([double? widgetWidth]) {
     final doc = ref.read(currentDocumentProvider);
     if (doc == null) return;
-    final newScale = _computeScale(doc.currentPage);
+    final w = widgetWidth ?? _lastKnownWidth;
+    if (w <= 0) return;
+    final newScale = _computeScaleFromCache(doc.currentPage, w);
     if ((newScale - _scale).abs() > 0.005) {
       setState(() => _scale = newScale);
       ref.read(textBlockNotifierProvider.notifier).applyScale(newScale);
@@ -558,9 +550,16 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
       _                   => SystemMouseCursors.precise,
     };
 
-    return Focus(
-      onKeyEvent: _onKey,
-      autofocus:  true,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth;
+        if (w > 0 && w != _lastKnownWidth) {
+          _lastKnownWidth = w;
+          WidgetsBinding.instance.addPostFrameCallback((_) => _updateScale(w));
+        }
+        return Focus(
+          onKeyEvent: _onKey,
+          autofocus:  true,
       child: MouseRegion(
         cursor: cursor,
         child: GestureDetector(
@@ -610,6 +609,8 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
           ),
         ),
       ),
+        );
+      },
     );
   }
 

@@ -1,10 +1,9 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart' show FontWeight, FontStyle, Colors;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pdfrx/pdfrx.dart';
+import 'package:syncfusion_flutter_pdf/pdf.dart' as sf;
 import 'package:uuid/uuid.dart';
 
 import '../models/annotation_model.dart';
@@ -14,64 +13,72 @@ final pdfServiceProvider = Provider<PdfService>((ref) => PdfService());
 
 const _uuid = Uuid();
 
-/// All PDF reading and writing goes through this service.
-/// Uses [pdfrx] (Google PDFium) exclusively — no Syncfusion dependency.
+/// All PDF I/O goes through this service.
+///
+/// Architecture:
+///   READ  / VIEW  — pdfrx (PDFium):  PdfDocument.openFile, loadStructuredText
+///   WRITE / SAVE  — syncfusion_flutter_pdf: PdfDocument(inputBytes), page.graphics
+///
+/// Why two libraries?
+///   pdfrx provides best-in-class text extraction with glyph-level bounds
+///   and PDFium-powered rendering.  It does NOT expose a write/annotation API
+///   from Dart.  Syncfusion covers the write side.
 class PdfService {
-  // ── Document info ──────────────────────────────────────────────────────────
+  // ── Page info ───────────────────────────────────────────────────────────────
 
   Future<int> getPageCount(String filePath) async {
     final doc   = await PdfDocument.openFile(filePath);
     final count = doc.pages.length;
-    doc.dispose();
+    await doc.dispose();
     return count;
   }
 
-  /// Returns the size of [pageNumber] (1-based) in PDF points (72pt = 1 inch).
   Future<({double width, double height})> getPageSize(
       String filePath, int pageNumber) async {
     final doc  = await PdfDocument.openFile(filePath);
     final idx  = (pageNumber - 1).clamp(0, doc.pages.length - 1);
     final page = doc.pages[idx];
     final size = (width: page.width, height: page.height);
-    doc.dispose();
+    await doc.dispose();
     return size;
   }
 
-  // ── Text extraction (PDFium glyph-level) ──────────────────────────────────
+  // ── Text extraction (pdfrx / PDFium) ────────────────────────────────────────
 
-  /// Extract all text lines from [pageNumber] (1-based) using PDFium.
+  /// Extract all text fragments from [pageNumber] (1-based) using PDFium.
   ///
-  /// pdfrx's [PdfPage.loadText] returns [PdfPageText] whose [fragments] list
-  /// carries exact glyph-level bounds, font name, font size, and bold/italic
-  /// flags — directly from the embedded PDF font metadata.
+  /// Uses [PdfPage.loadStructuredText] which returns [PdfPageText] whose
+  /// [fragments] list carries glyph-level bounding boxes.
   ///
-  /// We group fragments into visual lines (same Y midpoint ± half line height),
-  /// sort top-to-bottom, and return one [PdfTextBlock] per line.
+  /// [PdfPageTextFragment.bounds] is a [PdfRect] — a PDFium-native rect with
+  /// .left, .top, .right, .bottom in PDF-points (origin top-left, Y grows down).
   Future<List<PdfTextBlock>> extractTextBlocks(
     String filePath,
     int    pageNumber,
   ) async {
     final doc = await PdfDocument.openFile(filePath);
     if (pageNumber < 1 || pageNumber > doc.pages.length) {
-      doc.dispose();
+      await doc.dispose();
       return [];
     }
 
     final page     = doc.pages[pageNumber - 1];
-    final pageText = await page.loadText();
-
-    final fragments = pageText.fragments
+    final pageText = await page.loadStructuredText();
+    final frags    = pageText.fragments
         .where((f) => f.text.trim().isNotEmpty)
         .toList();
 
-    // ── Group into lines ───────────────────────────────────────────────────
-    final List<List<PdfPageTextFragment>> lines = [];
-    for (final frag in fragments) {
-      bool placed = false;
+    // Group fragments into visual lines by Y-midpoint proximity.
+    final lines = <List<PdfPageTextFragment>>[];
+    for (final frag in frags) {
+      // PdfRect fields: left, top, right, bottom (top-left origin)
+      final midY    = (frag.bounds.top + frag.bounds.bottom) / 2.0;
+      final lineH   = (frag.bounds.bottom - frag.bounds.top).abs();
+      final thresh  = (lineH * 0.6).clamp(2.0, 20.0);
+      bool placed   = false;
       for (final line in lines) {
-        final ref     = line.first;
-        final thresh  = (ref.bounds.height * 0.6).clamp(2.0, 20.0);
-        if ((frag.bounds.center.dy - ref.bounds.center.dy).abs() <= thresh) {
+        final refMid = (line.first.bounds.top + line.first.bounds.bottom) / 2.0;
+        if ((midY - refMid).abs() <= thresh) {
           line.add(frag);
           placed = true;
           break;
@@ -80,10 +87,10 @@ class PdfService {
       if (!placed) lines.add([frag]);
     }
 
-    // Sort lines top-to-bottom; fragments left-to-right within each line
+    // Sort top-to-bottom; left-to-right within each line.
     lines.sort((a, b) => a.first.bounds.top.compareTo(b.first.bounds.top));
-    for (final line in lines) {
-      line.sort((a, b) => a.bounds.left.compareTo(b.bounds.left));
+    for (final l in lines) {
+      l.sort((a, b) => a.bounds.left.compareTo(b.bounds.left));
     }
 
     final blocks = <PdfTextBlock>[];
@@ -96,39 +103,42 @@ class PdfService {
       final top    = line.map((f) => f.bounds.top    ).reduce((a,b) => a < b ? a : b);
       final right  = line.map((f) => f.bounds.right  ).reduce((a,b) => a > b ? a : b);
       final bottom = line.map((f) => f.bounds.bottom ).reduce((a,b) => a > b ? a : b);
-      final rect   = ui.Rect.fromLTRB(left, top, right, bottom);
 
-      final first  = line.first;
+      final first    = line.first;
+      final lineH    = (bottom - top).abs().clamp(4.0, double.infinity);
+      final fontSize = (lineH * 0.75).clamp(4.0, 144.0);
+
       blocks.add(PdfTextBlock(
         id:           _uuid.v4(),
         pageNumber:   pageNumber,
         originalText: text,
         editedText:   text,
-        pdfRect:      rect,
-        screenRect:   rect, // caller applies scale
-        fontSize:     first.fontSize.clamp(4.0, 144.0),
-        fontName:     first.fontName.isNotEmpty ? first.fontName : 'Helvetica',
-        isBold:       first.isBold,
-        isItalic:     first.isOblique,
+        pdfLeft:      left,
+        pdfTop:       top,
+        pdfRight:     right,
+        pdfBottom:    bottom,
+        screenRect:   ui.Rect.fromLTRB(left, top, right, bottom),
+        fontSize:     fontSize,
+        fontName:     'Helvetica',
+        isBold:       false,
+        isItalic:     false,
         colorArgb:    0xFF000000,
       ));
     }
 
-    doc.dispose();
+    await doc.dispose();
     return blocks;
   }
 
-  // ── Save ───────────────────────────────────────────────────────────────────
+  // ── Save (Syncfusion write path) ─────────────────────────────────────────────
 
-  /// Saves the PDF with:
-  ///   1. Edited existing-text blocks replaced via cover-and-redraw
-  ///      (PDFium has no content-stream text-edit API from Dart, so this
-  ///       is the same technique Adobe Acrobat uses for text-edit-only saves).
-  ///   2. New overlay annotations (highlight, underline, shapes, freehand…)
-  ///      added as proper PDF annotation objects via pdfrx.
+  /// Save the PDF with:
+  ///   1. Edited text blocks replaced (erase original → draw replacement).
+  ///   2. New overlay annotations burned in.
   ///
-  /// [pageHeights] maps page number → height in PDF points, used to flip
-  /// the Y-axis (PDFium graphics: bottom-left origin; our coords: top-left).
+  /// [pageHeights] maps 1-based page number → PDF page height in points.
+  /// Syncfusion uses bottom-left origin (Y grows UP), so we flip:
+  ///   sfBottom = pageHeight − pdfTop − blockHeight
   Future<void> saveWithAnnotations(
     String sourcePath,
     List<AnnotationModel> annotations,
@@ -136,200 +146,175 @@ class PdfService {
     List<PdfTextBlock> editedTextBlocks = const [],
     Map<int, double>   pageHeights      = const {},
   }) async {
-    final doc = await PdfDocument.openFile(sourcePath);
+    final bytes = await File(sourcePath).readAsBytes();
+    final doc   = sf.PdfDocument(inputBytes: bytes);
 
-    // ── 1. Replace edited text blocks ──────────────────────────────────────
+    // ── 1. Replace edited text ──────────────────────────────────────────────
     for (final block in editedTextBlocks.where((b) => b.isEdited)) {
       final pageIdx = block.pageNumber - 1;
-      if (pageIdx < 0 || pageIdx >= doc.pages.length) continue;
+      if (pageIdx < 0 || pageIdx >= doc.pages.count) continue;
 
       final page  = doc.pages[pageIdx];
-      final pageH = pageHeights[block.pageNumber] ?? page.height;
+      final pageH = pageHeights[block.pageNumber] ?? page.size.height;
 
-      // block.pdfRect: top-left origin (Y grows down) — from PdfPageText
-      // PDFium page.insertImage rect: bottom-left origin (Y grows up)
-      // Conversion: pdfBottom = pageHeight - pdfTop - blockHeight
-      final pdfLeft = block.pdfRect.left;
-      final pdfBot  = pageH - block.pdfRect.bottom;
-      final pdfW    = block.pdfRect.width.clamp(4.0, double.infinity);
-      final pdfH    = block.pdfRect.height.clamp(4.0, double.infinity);
-      final drawRect = ui.Rect.fromLTWH(pdfLeft, pdfBot, pdfW, pdfH);
+      // Flip Y: Syncfusion graphics uses bottom-left origin.
+      final sfBottom = pageH - block.pdfTop  - block.pdfHeight;
+      final sfRect   = ui.Rect.fromLTWH(
+          block.pdfLeft, sfBottom, block.pdfWidth, block.pdfHeight);
 
-      // (a) Erase — paint a white rectangle over the original text
-      final eraseImg = await _solidColorImage(0xFFFFFFFF,
-          pdfW.ceil(), pdfH.ceil());
-      await page.insertImage(eraseImg, drawRect);
+      // (a) Erase — white rectangle over original text.
+      page.graphics.drawRectangle(
+        brush:  sf.PdfSolidBrush(sf.PdfColor(255, 255, 255)),
+        bounds: sfRect,
+      );
 
-      // (b) Redraw — render replacement text as a Flutter raster image
+      // (b) Redraw replacement text.
       if (block.editedText.trim().isNotEmpty) {
-        final textImg = await _renderTextToImage(
-          text:     block.editedText,
-          fontSize: block.fontSize,
-          isBold:   block.isBold,
-          isItalic: block.isItalic,
-          color:    ui.Color(block.colorArgb),
-          widthPt:  pdfW,
-          heightPt: pdfH,
+        final fontFamily = _matchFont(block.fontName);
+        final fontStyle  = block.isBold
+            ? (block.isItalic ? sf.PdfFontStyle.boldItalic : sf.PdfFontStyle.bold)
+            : (block.isItalic ? sf.PdfFontStyle.italic     : sf.PdfFontStyle.regular);
+        final font = sf.PdfStandardFont(fontFamily, block.fontSize,
+            style: fontStyle);
+        page.graphics.drawString(
+          block.editedText,
+          font,
+          brush:  sf.PdfSolidBrush(_sfColor(block.colorArgb)),
+          bounds: sfRect,
         );
-        await page.insertImage(textImg, drawRect);
       }
     }
 
-    // ── 2. Add new overlay annotations ─────────────────────────────────────
+    // ── 2. Burn in overlay annotations ─────────────────────────────────────
     for (final a in annotations) {
       final pageIdx = a.pageNumber - 1;
-      if (pageIdx < 0 || pageIdx >= doc.pages.length) continue;
-
+      if (pageIdx < 0 || pageIdx >= doc.pages.count) continue;
       final page  = doc.pages[pageIdx];
-      final pageH = pageHeights[a.pageNumber] ?? page.height;
-
-      // Annotation coords: top-left origin → PDFium bottom-left origin
-      final sfBot = pageH - a.y - a.height;
-      final rect  = ui.Rect.fromLTWH(a.x, sfBot, a.width, a.height);
-
-      switch (a.type) {
-        case AnnotationType.text:
-          if (a.content.trim().isNotEmpty) {
-            final img = await _renderTextToImage(
-              text:     a.content,
-              fontSize: a.fontSize,
-              isBold:   a.isBold,
-              isItalic: a.isItalic,
-              color:    ui.Color(a.color),
-              widthPt:  a.width,
-              heightPt: a.height,
-            );
-            await page.insertImage(img, rect);
-          }
-          break;
-
-        case AnnotationType.highlight:
-          page.addAnnotation(PdfHighlightAnnotation(
-            color: ui.Color(a.color).withValues(alpha: 0.4),
-            rects: [rect],
-          ));
-          break;
-
-        case AnnotationType.underline:
-          page.addAnnotation(PdfUnderlineAnnotation(
-            color: ui.Color(a.color),
-            rects: [rect],
-          ));
-          break;
-
-        case AnnotationType.strikethrough:
-          page.addAnnotation(PdfStrikeoutAnnotation(
-            color: ui.Color(a.color),
-            rects: [rect],
-          ));
-          break;
-
-        case AnnotationType.rectangle:
-          page.addAnnotation(PdfSquareAnnotation(
-            rect:        rect,
-            color:       ui.Color(a.color),
-            fillColor:   const ui.Color(0x00000000),
-            borderWidth: a.strokeWidth,
-          ));
-          break;
-
-        case AnnotationType.circle:
-          page.addAnnotation(PdfCircleAnnotation(
-            rect:        rect,
-            color:       ui.Color(a.color),
-            fillColor:   const ui.Color(0x00000000),
-            borderWidth: a.strokeWidth,
-          ));
-          break;
-
-        case AnnotationType.freehand:
-          if (a.pathPoints != null && a.pathPoints!.length > 1) {
-            final pts = a.pathPoints!
-                .map((p) => ui.Offset(p['x']!, pageH - p['y']!))
-                .toList();
-            page.addAnnotation(PdfInkAnnotation(
-              color:       ui.Color(a.color),
-              borderWidth: a.strokeWidth,
-              inkList:     [pts],
-            ));
-          }
-          break;
-
-        default:
-          break;
-      }
+      final pageH = pageHeights[a.pageNumber] ?? page.size.height;
+      _writeAnnotation(page, a, pageH);
     }
 
-    // ── 3. Write output file ────────────────────────────────────────────────
-    final Uint8List savedBytes = await doc.save();
-    await File(outputPath).writeAsBytes(savedBytes);
+    final saved = await doc.save();
+    await File(outputPath).writeAsBytes(saved);
     doc.dispose();
   }
 
-  // ── Image helpers ──────────────────────────────────────────────────────────
+  // ── Helpers ──────────────────────────────────────────────────────────────────
 
-  /// Create a [PdfImage] filled entirely with [argb].
-  Future<PdfImage> _solidColorImage(int argb, int w, int h) async {
-    final pixels = Uint8List(w * h * 4);
-    final r = (argb >> 16) & 0xFF;
-    final g = (argb >> 8)  & 0xFF;
-    final b = argb & 0xFF;
-    final a = (argb >> 24) & 0xFF;
-    for (int i = 0; i < w * h; i++) {
-      pixels[i * 4]     = r;
-      pixels[i * 4 + 1] = g;
-      pixels[i * 4 + 2] = b;
-      pixels[i * 4 + 3] = a;
-    }
-    return PdfImage.fromRgba(width: w, height: h, pixels: pixels);
+  sf.PdfColor _sfColor(int argb, {double? opacity}) {
+    final a = opacity != null
+        ? (opacity * 255).round()
+        : (argb >> 24) & 0xFF;
+    return sf.PdfColor(
+      (argb >> 16) & 0xFF,
+      (argb >> 8)  & 0xFF,
+       argb        & 0xFF,
+      a,
+    );
   }
 
-  /// Render [text] to a [PdfImage] using Flutter's canvas at 2× resolution
-  /// so glyphs look crisp at any zoom level after embedding in the PDF.
-  Future<PdfImage> _renderTextToImage({
-    required String   text,
-    required double   fontSize,
-    required bool     isBold,
-    required bool     isItalic,
-    required ui.Color color,
-    required double   widthPt,
-    required double   heightPt,
-  }) async {
-    const scale = 2.0; // render at 2× for crisp embedding
-    final wPx   = (widthPt  * scale).ceil().clamp(1, 4096);
-    final hPx   = (heightPt * scale).ceil().clamp(1, 4096);
+  sf.PdfFontFamily _matchFont(String name) {
+    final l = name.toLowerCase();
+    if (l.contains('times') || l.contains('serif') || l.contains('georgia')) {
+      return sf.PdfFontFamily.timesRoman;
+    }
+    if (l.contains('courier') || l.contains('mono')) {
+      return sf.PdfFontFamily.courier;
+    }
+    return sf.PdfFontFamily.helvetica;
+  }
 
-    final recorder = ui.PictureRecorder();
-    final canvas   = ui.Canvas(
-        recorder, ui.Rect.fromLTWH(0, 0, wPx.toDouble(), hPx.toDouble()));
+  /// Convert annotation coords (top-left origin) to Syncfusion (bottom-left).
+  ui.Rect _sfRect(AnnotationModel a, double pageH) {
+    final sfBottom = pageH - a.y - a.height;
+    return ui.Rect.fromLTWH(a.x, sfBottom, a.width, a.height);
+  }
 
-    final pb = ui.ParagraphBuilder(
-      ui.ParagraphStyle(
-        fontWeight: isBold   ? FontWeight.bold   : FontWeight.normal,
-        fontStyle:  isItalic ? FontStyle.italic  : FontStyle.normal,
-        fontSize:   fontSize * scale,
-        maxLines:   null,
-      ),
-    )
-      ..pushStyle(ui.TextStyle(color: color))
-      ..addText(text);
+  void _writeAnnotation(sf.PdfPage page, AnnotationModel a, double pageH) {
+    final rect = _sfRect(a, pageH);
+    switch (a.type) {
+      case AnnotationType.text:
+        if (a.content.trim().isNotEmpty) {
+          final style = a.isBold
+              ? (a.isItalic ? sf.PdfFontStyle.boldItalic : sf.PdfFontStyle.bold)
+              : (a.isItalic ? sf.PdfFontStyle.italic     : sf.PdfFontStyle.regular);
+          final font = sf.PdfStandardFont(
+              sf.PdfFontFamily.helvetica, a.fontSize, style: style);
+          page.graphics.drawString(
+            a.content, font,
+            brush:  sf.PdfSolidBrush(_sfColor(a.color)),
+            bounds: rect,
+          );
+        }
+        break;
 
-    final para = pb.build()
-      ..layout(ui.ParagraphConstraints(width: wPx.toDouble()));
-    canvas.drawParagraph(para, ui.Offset.zero);
+      case AnnotationType.highlight:
+        page.annotations.add(sf.PdfTextMarkupAnnotation(
+          rect,
+          a.content.isEmpty ? 'Highlight' : a.content,
+          _sfColor(a.color, opacity: 0.4),
+          textMarkupAnnotationType: sf.PdfTextMarkupAnnotationType.highlight,
+        ));
+        break;
 
-    final picture  = recorder.endRecording();
-    final image    = await picture.toImage(wPx, hPx);
-    final byteData = await image.toByteData(
-        format: ui.ImageByteFormat.rawRgba);
+      case AnnotationType.underline:
+        page.annotations.add(sf.PdfTextMarkupAnnotation(
+          rect,
+          a.content.isEmpty ? 'Underline' : a.content,
+          _sfColor(a.color),
+          textMarkupAnnotationType: sf.PdfTextMarkupAnnotationType.underline,
+        ));
+        break;
 
-    image.dispose();
-    picture.dispose();
+      case AnnotationType.strikethrough:
+        page.annotations.add(sf.PdfTextMarkupAnnotation(
+          rect,
+          a.content.isEmpty ? 'Strikethrough' : a.content,
+          _sfColor(a.color),
+          textMarkupAnnotationType:
+              sf.PdfTextMarkupAnnotationType.strikethrough,
+        ));
+        break;
 
-    return PdfImage.fromRgba(
-      width:  wPx,
-      height: hPx,
-      pixels: byteData!.buffer.asUint8List(),
-    );
+      case AnnotationType.rectangle:
+        final ann = sf.PdfRectangleAnnotation(
+          rect,
+          a.content.isEmpty ? 'Rectangle' : a.content,
+        );
+        ann.color        = _sfColor(a.color);
+        ann.innerColor   = sf.PdfColor(0, 0, 0, 0);
+        ann.border.width = a.strokeWidth;
+        page.annotations.add(ann);
+        break;
+
+      case AnnotationType.circle:
+        final ann = sf.PdfEllipseAnnotation(
+          rect,
+          a.content.isEmpty ? 'Circle' : a.content,
+        );
+        ann.color        = _sfColor(a.color);
+        ann.innerColor   = sf.PdfColor(0, 0, 0, 0);
+        ann.border.width = a.strokeWidth;
+        page.annotations.add(ann);
+        break;
+
+      case AnnotationType.freehand:
+        if (a.pathPoints != null && a.pathPoints!.length > 1) {
+          final pen = sf.PdfPen(_sfColor(a.color), width: a.strokeWidth);
+          pen.lineCap = sf.PdfLineCap.round;
+          final pts = a.pathPoints!;
+          for (int i = 0; i < pts.length - 1; i++) {
+            page.graphics.drawLine(
+              pen,
+              ui.Offset(pts[i]['x']!,     pageH - pts[i]['y']!),
+              ui.Offset(pts[i+1]['x']!, pageH - pts[i+1]['y']!),
+            );
+          }
+        }
+        break;
+
+      default:
+        break;
+    }
   }
 }

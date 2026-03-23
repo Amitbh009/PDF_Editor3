@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'dart:ui' show Offset;
+import 'dart:ui' show Offset, Rect;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
@@ -11,19 +11,17 @@ import '../services/pdf_service.dart';
 
 const _uuid = Uuid();
 
-// ─── Document provider ────────────────────────────────────────────────────────
-
+// ── Document provider ─────────────────────────────────────────────────────────
 final currentDocumentProvider =
     StateNotifierProvider<DocumentNotifier, PdfDocumentModel?>(
   (ref) => DocumentNotifier(ref.watch(pdfServiceProvider)),
 );
 
-// ─── Tool enum ────────────────────────────────────────────────────────────────
-
+// ── Tool enum ─────────────────────────────────────────────────────────────────
 enum EditorTool {
   select,
-  editText,       // ← Click existing PDF text to edit Word-style (PDFium-backed)
-  text,           // Add new text annotation
+  editText,       // click existing PDF text to edit Word-style
+  text,           // add new text overlay annotation
   highlight,
   underline,
   strikethrough,
@@ -34,28 +32,24 @@ enum EditorTool {
   eraser,
 }
 
-// ─── Style providers ──────────────────────────────────────────────────────────
-
-final selectedToolProvider =
-    StateProvider<EditorTool>((ref) => EditorTool.select);
-final selectedColorProvider  = StateProvider<int>((ref) => 0xFF000000);
-final strokeWidthProvider    = StateProvider<double>((ref) => 2.0);
-final fontSizeProvider       = StateProvider<double>((ref) => 14.0);
-final opacityProvider        = StateProvider<double>((ref) => 1.0);
-final zoomLevelProvider      = StateProvider<double>((ref) => 1.0);
-final isBoldProvider         = StateProvider<bool>((ref) => false);
-final isItalicProvider       = StateProvider<bool>((ref) => false);
+// ── Style providers ───────────────────────────────────────────────────────────
+final selectedToolProvider     = StateProvider<EditorTool>((ref) => EditorTool.select);
+final selectedColorProvider    = StateProvider<int>((ref) => 0xFF000000);
+final strokeWidthProvider      = StateProvider<double>((ref) => 2.0);
+final fontSizeProvider         = StateProvider<double>((ref) => 14.0);
+final opacityProvider          = StateProvider<double>((ref) => 1.0);
+final zoomLevelProvider        = StateProvider<double>((ref) => 1.0);
+final isBoldProvider           = StateProvider<bool>((ref) => false);
+final isItalicProvider         = StateProvider<bool>((ref) => false);
 final selectedAnnotationIdProvider = StateProvider<String?>((ref) => null);
 
-// ─── Page size cache (PDF points) ────────────────────────────────────────────
-// Populated by EditorScreen once onDocumentLoaded fires, giving us the true
-// PDFium page dimensions for exact coordinate conversion.
-
+// ── Page-size cache (PDF points) ──────────────────────────────────────────────
+// Populated by EditorScreen once the document loads via PdfViewerParams.
+// Used for exact Y-axis flipping on save and exact scale calculation.
 final pageWidthCacheProvider  = StateProvider<Map<int, double>>((ref) => {});
 final pageHeightCacheProvider = StateProvider<Map<int, double>>((ref) => {});
 
-// ─── Text-block state (PDFium-extracted) ──────────────────────────────────────
-
+// ── Text-block state ──────────────────────────────────────────────────────────
 final textBlockNotifierProvider =
     StateNotifierProvider<TextBlockNotifier, List<PdfTextBlock>>(
   (ref) => TextBlockNotifier(ref.watch(pdfServiceProvider)),
@@ -66,22 +60,23 @@ class TextBlockNotifier extends StateNotifier<List<PdfTextBlock>> {
 
   final PdfService _service;
 
-  /// Extract text blocks for [page] from [filePath] via PDFium.
   Future<void> load(String filePath, int page) async {
-    final blocks = await _service.extractTextBlocks(filePath, page);
-    state = blocks;
+    state = await _service.extractTextBlocks(filePath, page);
   }
 
-  /// Recalculate screen-space rects when the viewer zoom changes.
-  /// [scale] = screen pixels per PDF point.
+  /// Apply viewer scale (screen-px per PDF-pt) to all blocks.
   void applyScale(double scale) {
     if (scale <= 0) return;
     state = state.map((b) => b.withScreenRect(
-          b.pdfRect.scale(scale, scale),
+          Rect.fromLTWH(
+            b.pdfLeft   * scale,
+            b.pdfTop    * scale,
+            b.pdfWidth  * scale,
+            b.pdfHeight * scale,
+          ),
         )).toList();
   }
 
-  /// Commit an in-place text edit.
   void updateBlock(String id, String newText) {
     state = state.map((b) {
       if (b.id != id) return b;
@@ -89,56 +84,48 @@ class TextBlockNotifier extends StateNotifier<List<PdfTextBlock>> {
       b.isEdited   = newText != b.originalText;
       return b;
     }).toList();
-    // Notify Riverpod that the list changed
-    state = List.from(state);
+    state = List.from(state); // force Riverpod rebuild
   }
 
   void clear() => state = [];
 
-  List<PdfTextBlock> get editedBlocks =>
-      state.where((b) => b.isEdited).toList();
-
-  bool get hasEdits => state.any((b) => b.isEdited);
+  List<PdfTextBlock> get editedBlocks => state.where((b) => b.isEdited).toList();
+  bool               get hasEdits      => state.any((b) => b.isEdited);
 }
 
-// ─── Undo/redo availability ───────────────────────────────────────────────────
-
+// ── Undo / redo ───────────────────────────────────────────────────────────────
 final canUndoProvider = Provider<bool>((ref) {
-  final notifier = ref.watch(currentDocumentProvider.notifier);
   ref.watch(currentDocumentProvider);
-  return notifier.canUndo;
+  return ref.watch(currentDocumentProvider.notifier).canUndo;
 });
 
 final canRedoProvider = Provider<bool>((ref) {
-  final notifier = ref.watch(currentDocumentProvider.notifier);
   ref.watch(currentDocumentProvider);
-  return notifier.canRedo;
+  return ref.watch(currentDocumentProvider.notifier).canRedo;
 });
 
-// ─── Document notifier ────────────────────────────────────────────────────────
-
+// ── Document notifier ─────────────────────────────────────────────────────────
 class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
   DocumentNotifier(this._pdfService) : super(null);
 
   final PdfService _pdfService;
-
-  final List<List<AnnotationModel>> _undoStack = [];
-  final List<List<AnnotationModel>> _redoStack = [];
+  final _undoStack = <List<AnnotationModel>>[];
+  final _redoStack = <List<AnnotationModel>>[];
 
   bool get canUndo => _undoStack.isNotEmpty;
   bool get canRedo => _redoStack.isNotEmpty;
 
   void _snapshot() {
     if (state == null) return;
-    _undoStack.add(List<AnnotationModel>.from(state!.annotations));
+    _undoStack.add(List.from(state!.annotations));
     _redoStack.clear();
   }
 
   void undo() {
     if (state == null || _undoStack.isEmpty) return;
-    _redoStack.add(List<AnnotationModel>.from(state!.annotations));
+    _redoStack.add(List.from(state!.annotations));
     state = state!.copyWith(
-      annotations:  List<AnnotationModel>.from(_undoStack.removeLast()),
+      annotations:  List.from(_undoStack.removeLast()),
       isModified:   true,
       lastModified: DateTime.now(),
     );
@@ -146,9 +133,9 @@ class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
 
   void redo() {
     if (state == null || _redoStack.isEmpty) return;
-    _undoStack.add(List<AnnotationModel>.from(state!.annotations));
+    _undoStack.add(List.from(state!.annotations));
     state = state!.copyWith(
-      annotations:  List<AnnotationModel>.from(_redoStack.removeLast()),
+      annotations:  List.from(_redoStack.removeLast()),
       isModified:   true,
       lastModified: DateTime.now(),
     );
@@ -157,33 +144,31 @@ class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
   Future<void> openDocument(String filePath) async {
     _undoStack.clear();
     _redoStack.clear();
-    final pageCount = await _pdfService.getPageCount(filePath);
+    final count = await _pdfService.getPageCount(filePath);
     state = PdfDocumentModel(
       id:           _uuid.v4(),
       filePath:     filePath,
       fileName:     filePath.split(Platform.pathSeparator).last,
-      totalPages:   pageCount,
+      totalPages:   count,
       lastModified: DateTime.now(),
     );
   }
 
-  void addAnnotation(AnnotationModel annotation) {
+  void addAnnotation(AnnotationModel a) {
     if (state == null) return;
     _snapshot();
     state = state!.copyWith(
-      annotations:  [...state!.annotations, annotation],
+      annotations:  [...state!.annotations, a],
       isModified:   true,
       lastModified: DateTime.now(),
     );
   }
 
-  void updateAnnotation(AnnotationModel annotation) {
+  void updateAnnotation(AnnotationModel a) {
     if (state == null) return;
     _snapshot();
     state = state!.copyWith(
-      annotations: state!.annotations
-          .map((a) => a.id == annotation.id ? annotation : a)
-          .toList(),
+      annotations: state!.annotations.map((x) => x.id == a.id ? a : x).toList(),
       isModified:   true,
       lastModified: DateTime.now(),
     );
@@ -199,20 +184,12 @@ class DocumentNotifier extends StateNotifier<PdfDocumentModel?> {
     );
   }
 
-  void deleteAllAnnotations() {
-    if (state == null) return;
-    _snapshot();
-    state = state!.copyWith(annotations: [], isModified: true);
-  }
-
   void deleteAllOnPage(int page) {
     if (state == null) return;
     _snapshot();
     state = state!.copyWith(
-      annotations: state!.annotations
-          .where((a) => a.pageNumber != page)
-          .toList(),
-      isModified: true,
+      annotations: state!.annotations.where((a) => a.pageNumber != page).toList(),
+      isModified:  true,
     );
   }
 

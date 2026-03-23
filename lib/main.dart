@@ -7,9 +7,9 @@ import 'screens/home_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // pdfrx (PDFium) must be initialised before any PDF API is called.
-  // This loads the native PDFium shared library for the current platform.
-  pdfrxFlutterInitialize();
+  // Must be called before any pdfrx engine API is used directly
+  // (e.g. PdfDocument.openFile outside of a widget).
+  await pdfrxFlutterInitialize();
   runApp(const ProviderScope(child: PdfEditorApp()));
 }
 

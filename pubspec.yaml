@@ -1,5 +1,5 @@
 name: pdf_editor
-description: A production-grade PDF editor for Android & Windows, powered by PDFium via pdfrx
+description: A production-grade PDF editor for Android & Windows
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -10,22 +10,22 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # ── PDF rendering & editing (PDFium) ─────────────────────────────────────
-  # pdfrx wraps Google PDFium. Requires web ^1.1.1.
+  # ── PDF VIEWING (pdfrx / PDFium) ─────────────────────────────────────────
+  # Used for: PdfViewer widget, text extraction via loadStructuredText()
   pdfrx: ^2.2.24
 
+  # ── PDF WRITING (Syncfusion) ─────────────────────────────────────────────
+  # Used for: saving annotations + redacting and redrawing text edits.
+  # pdfrx has NO write/annotation API from Dart, so we keep Syncfusion
+  # for the save path only.
+  syncfusion_flutter_pdf: ^26.1.35
+
   # ── File system ───────────────────────────────────────────────────────────
-  # file_picker 10.x — API unchanged from 8.x for pickFiles()
   file_picker: ^10.3.0
   path_provider: ^2.1.5
-  # permission_handler 12.x — API unchanged for Permission.storage.request()
   permission_handler: ^12.0.0
 
   # ── State management ──────────────────────────────────────────────────────
-  # Staying on Riverpod 2.6.1 (latest 2.x). Riverpod 3.0 is a major breaking
-  # change (StateNotifierProvider moved to legacy.dart) requiring full
-  # provider rewrite. 2.6.1 is fully stable and compatible with all
-  # packages in this pubspec.
   flutter_riverpod: ^2.6.1
   riverpod_annotation: ^2.6.1
 
@@ -37,9 +37,8 @@ dependencies:
   uuid: ^4.5.1
   freezed_annotation: ^2.4.4
   json_annotation: ^4.9.0
-  # share_plus 12.0.1 — fixes web ^1.1.x conflict with pdfrx.
-  # BREAKING: API changed to SharePlus.instance.share(ShareParams(...)).
-  # All call sites in this project have been updated accordingly.
+  # share_plus 12.x fixes the web ^1.1.x conflict with pdfrx.
+  # Breaking API: use SharePlus.instance.share(ShareParams(...)).
   share_plus: ^12.0.1
 
 dev_dependencies:
@@ -47,7 +46,6 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^5.0.0
   build_runner: ^2.4.14
-  # freezed 2.5.7 — last stable 2.x, compatible with freezed_annotation ^2.4.4
   freezed: ^2.5.7
   json_serializable: ^6.9.2
   riverpod_generator: ^2.6.3
