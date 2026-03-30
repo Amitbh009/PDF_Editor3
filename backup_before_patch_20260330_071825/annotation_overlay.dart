@@ -580,8 +580,11 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
           onDoubleTapDown: _onDoubleTap,
           child: Stack(
             children: [
+              // ── Text block highlight overlays (editText mode) ────────────
+              if (tool == EditorTool.editText)
+                ..._buildBlockHighlights(textBlocks),
+
               // ── Annotation canvas ────────────────────────────────────────
-              // Must be BELOW block highlights so it doesn't intercept taps.
               CustomPaint(
                 painter: _AnnotationPainter(
                   annotations:    annotations,
@@ -596,16 +599,8 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
                   editingId:      _editingAnnotationId,
                   scale:          _scale,
                 ),
-                // Use SizedBox.expand so the CustomPaint fills the area but
-                // does NOT create an opaque hit-test target over the highlights.
-                child: SizedBox.expand(),
+                child: Container(color: Colors.transparent),
               ),
-
-              // ── Text block highlight overlays (editText mode) ────────────
-              // Rendered ON TOP of CustomPaint so their GestureDetectors
-              // receive taps first when Edit Text tool is active.
-              if (tool == EditorTool.editText)
-                ..._buildBlockHighlights(textBlocks),
 
               // ── Overlay text annotation editor ───────────────────────────
               if (_editingAnnotationId != null)
