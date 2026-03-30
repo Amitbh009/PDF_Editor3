@@ -50,9 +50,8 @@ class PdfService {
   /// Uses [PdfPage.loadStructuredText] which returns [PdfPageText] whose
   /// [fragments] list carries glyph-level bounding boxes.
   ///
-  /// [PdfPageTextFragment.bounds] is a [PdfRect] — PDF-native coords with
-  /// bottom-left origin, Y grows UP (top > bottom). Converted to Flutter space
-  /// (top-left origin, Y grows down) before storing in [PdfTextBlock].
+  /// [PdfPageTextFragment.bounds] is a [PdfRect] — a PDFium-native rect with
+  /// .left, .top, .right, .bottom in PDF-points (origin top-left, Y grows down).
   Future<List<PdfTextBlock>> extractTextBlocks(
     String filePath,
     int    pageNumber,
@@ -69,33 +68,16 @@ class PdfService {
         .where((f) => f.text.trim().isNotEmpty)
         .toList();
 
-    // ── Coordinate system note ───────────────────────────────────────────────
-    // pdfrx PdfRect uses PDF native coords: bottom-left origin, Y grows UP.
-    //   frag.bounds.top    = LARGER  Y = visually HIGH on page
-    //   frag.bounds.bottom = SMALLER Y = visually LOW on page
-    //
-    // We convert immediately to Flutter space (top-left origin, Y grows DOWN):
-    //   flutterTop    = pageHeight - pdfNativeTop
-    //   flutterBottom = pageHeight - pdfNativeBottom
-    //
-    // All stored pdfLeft/pdfTop/pdfRight/pdfBottom values are already in
-    // Flutter space, so applyScale multiplies directly, and saveWithAnnotations
-    // converts back to PDF native with:  pdfNativeTop = pageH - flutterTop
-    final pageH = page.height;
-
-    // Group fragments into visual lines by Y-midpoint proximity (Flutter space).
+    // Group fragments into visual lines by Y-midpoint proximity.
     final lines = <List<PdfPageTextFragment>>[];
     for (final frag in frags) {
-      final ftTop    = pageH - frag.bounds.top;    // flutter Y (smaller = higher)
-      final ftBottom = pageH - frag.bounds.bottom; // flutter Y (larger  = lower)
-      final midY     = (ftTop + ftBottom) / 2.0;
-      final lineH    = (ftBottom - ftTop).abs();
-      final thresh   = (lineH * 0.6).clamp(2.0, 20.0);
-      bool placed    = false;
+      // PdfRect fields: left, top, right, bottom (top-left origin)
+      final midY    = (frag.bounds.top + frag.bounds.bottom) / 2.0;
+      final lineH   = (frag.bounds.bottom - frag.bounds.top).abs();
+      final thresh  = (lineH * 0.6).clamp(2.0, 20.0);
+      bool placed   = false;
       for (final line in lines) {
-        final rftTop    = pageH - line.first.bounds.top;
-        final rftBottom = pageH - line.first.bounds.bottom;
-        final refMid    = (rftTop + rftBottom) / 2.0;
+        final refMid = (line.first.bounds.top + line.first.bounds.bottom) / 2.0;
         if ((midY - refMid).abs() <= thresh) {
           line.add(frag);
           placed = true;
@@ -105,12 +87,8 @@ class PdfService {
       if (!placed) lines.add([frag]);
     }
 
-    // Sort top-to-bottom (ascending Flutter Y); left-to-right within each line.
-    lines.sort((a, b) {
-      final aFtTop = pageH - a.first.bounds.top;
-      final bFtTop = pageH - b.first.bounds.top;
-      return aFtTop.compareTo(bFtTop);
-    });
+    // Sort top-to-bottom; left-to-right within each line.
+    lines.sort((a, b) => a.first.bounds.top.compareTo(b.first.bounds.top));
     for (final l in lines) {
       l.sort((a, b) => a.bounds.left.compareTo(b.bounds.left));
     }
@@ -121,16 +99,12 @@ class PdfService {
       final text = line.map((f) => f.text).join('');
       if (text.trim().isEmpty) continue;
 
-      final left  = line.map((f) => f.bounds.left ).reduce((a, b) => a < b ? a : b);
-      final right = line.map((f) => f.bounds.right).reduce((a, b) => a > b ? a : b);
-      // PDF native: top > bottom.  Pick widest spanning native coords.
-      final pdfNativeTop    = line.map((f) => f.bounds.top   ).reduce((a, b) => a > b ? a : b);
-      final pdfNativeBottom = line.map((f) => f.bounds.bottom).reduce((a, b) => a < b ? a : b);
-      // Convert to Flutter Y space.
-      final ftTop    = pageH - pdfNativeTop;
-      final ftBottom = pageH - pdfNativeBottom;
+      final left   = line.map((f) => f.bounds.left  ).reduce((a,b) => a < b ? a : b);
+      final top    = line.map((f) => f.bounds.top    ).reduce((a,b) => a < b ? a : b);
+      final right  = line.map((f) => f.bounds.right  ).reduce((a,b) => a > b ? a : b);
+      final bottom = line.map((f) => f.bounds.bottom ).reduce((a,b) => a > b ? a : b);
 
-      final lineH    = (ftBottom - ftTop).clamp(4.0, double.infinity);
+      final lineH    = (bottom - top).abs().clamp(4.0, double.infinity);
       final fontSize = (lineH * 0.75).clamp(4.0, 144.0);
 
       blocks.add(PdfTextBlock(
@@ -138,12 +112,11 @@ class PdfService {
         pageNumber:   pageNumber,
         originalText: text,
         editedText:   text,
-        // All coords stored in Flutter space (top-left origin, Y grows down).
         pdfLeft:      left,
-        pdfTop:       ftTop,
+        pdfTop:       top,
         pdfRight:     right,
-        pdfBottom:    ftBottom,
-        screenRect:   ui.Rect.fromLTRB(left, ftTop, right, ftBottom),
+        pdfBottom:    bottom,
+        screenRect:   ui.Rect.fromLTRB(left, top, right, bottom),
         fontSize:     fontSize,
         fontName:     'Helvetica',
         isBold:       false,
@@ -163,8 +136,8 @@ class PdfService {
   ///   2. New overlay annotations burned in.
   ///
   /// [pageHeights] maps 1-based page number → PDF page height in points.
-  /// Syncfusion page.graphics uses top-left origin (Y grows DOWN), matching
-  /// Flutter's coordinate space — no Y-flip needed for text blocks or overlays.
+  /// Syncfusion uses bottom-left origin (Y grows UP), so we flip:
+  ///   sfBottom = pageHeight − pdfTop − blockHeight
   Future<void> saveWithAnnotations(
     String sourcePath,
     List<AnnotationModel> annotations,
@@ -183,11 +156,10 @@ class PdfService {
       final page  = doc.pages[pageIdx];
       final pageH = pageHeights[block.pageNumber] ?? page.size.height;
 
-      // pdfLeft/pdfTop/pdfRight/pdfBottom are stored in Flutter space
-      // (top-left origin, Y grows DOWN) by extractTextBlocks.
-      // Syncfusion page.graphics also uses top-left origin — use directly.
-      final sfRect = ui.Rect.fromLTWH(
-          block.pdfLeft, block.pdfTop, block.pdfWidth, block.pdfHeight);
+      // Flip Y: Syncfusion graphics uses bottom-left origin.
+      final sfBottom = pageH - block.pdfTop  - block.pdfHeight;
+      final sfRect   = ui.Rect.fromLTWH(
+          block.pdfLeft, sfBottom, block.pdfWidth, block.pdfHeight);
 
       // (a) Erase — white rectangle over original text.
       page.graphics.drawRectangle(
@@ -271,10 +243,10 @@ class PdfService {
     return sf.PdfFontFamily.helvetica;
   }
 
-  /// Annotation coords are stored in Flutter space (top-left origin, Y grows DOWN).
-  /// Syncfusion page.graphics also uses top-left origin — pass coords directly.
+  /// Convert annotation coords (top-left origin) to Syncfusion (bottom-left).
   ui.Rect _sfRect(AnnotationModel a, double pageH) {
-    return ui.Rect.fromLTWH(a.x, a.y, a.width, a.height);
+    final sfBottom = pageH - a.y - a.height;
+    return ui.Rect.fromLTWH(a.x, sfBottom, a.width, a.height);
   }
 
   void _writeAnnotation(sf.PdfPage page, AnnotationModel a, double pageH) {
@@ -344,16 +316,14 @@ class PdfService {
 
       case AnnotationType.freehand:
         if (a.pathPoints != null && a.pathPoints!.length > 1) {
-          // pathPoints are stored in Flutter space (top-left origin, Y grows DOWN).
-          // Syncfusion page.graphics also uses top-left origin — no Y-flip needed.
           final pen = sf.PdfPen(_sfColor(a.color), width: a.strokeWidth);
           pen.lineCap = sf.PdfLineCap.round;
           final pts = a.pathPoints!;
           for (int i = 0; i < pts.length - 1; i++) {
             page.graphics.drawLine(
               pen,
-              ui.Offset(pts[i]['x']!,   pts[i]['y']!),
-              ui.Offset(pts[i+1]['x']!, pts[i+1]['y']!),
+              ui.Offset(pts[i]['x']!,     pageH - pts[i]['y']!),
+              ui.Offset(pts[i+1]['x']!, pageH - pts[i+1]['y']!),
             );
           }
         }

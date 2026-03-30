@@ -59,7 +59,6 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
   @override
   void initState() {
     super.initState();
-    // Load blocks after the first frame so providers are ready.
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadBlocks());
   }
 
@@ -532,15 +531,6 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
       if (prev?.currentPage != next?.currentPage) _loadBlocks();
     });
 
-    // Reload blocks whenever the editText tool becomes active so they are
-    // always fresh (covers the case where the document was opened before
-    // the overlay was mounted, or the user switches tool after a page turn).
-    ref.listen(selectedToolProvider, (prev, next) {
-      if (next == EditorTool.editText && prev != EditorTool.editText) {
-        _loadBlocks();
-      }
-    });
-
     if (doc == null) return const SizedBox.shrink();
 
     // Update scale every build using the pdfrx controller
@@ -629,30 +619,22 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
   List<Widget> _buildBlockHighlights(List<PdfTextBlock> blocks) {
     return blocks.map((b) {
       final editing = b.id == _editingBlockId;
-      // NOTE: No IgnorePointer here — these widgets must be tappable so
-      // the GestureDetector parent can receive onTapUp and call _startBlockEdit.
       return Positioned.fromRect(
         rect: b.screenRect,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () {
-            _commitAnnotationEdit();
-            _commitBlockEdit();
-            _startBlockEdit(b);
-          },
+        child: IgnorePointer(
           child: Container(
             decoration: BoxDecoration(
               color: editing
-                  ? Colors.blue.withValues(alpha: 0.15)
+                  ? Colors.blue.withValues(alpha: 0.12)
                   : b.isEdited
-                      ? Colors.green.withValues(alpha: 0.12)
-                      : Colors.blue.withValues(alpha: 0.05),
+                      ? Colors.green.withValues(alpha: 0.10)
+                      : Colors.transparent,
               border: Border.all(
                 color: editing
-                    ? Colors.blue.withValues(alpha: 0.80)
+                    ? Colors.blue.withValues(alpha: 0.75)
                     : b.isEdited
-                        ? Colors.green.withValues(alpha: 0.65)
-                        : Colors.blue.withValues(alpha: 0.30),
+                        ? Colors.green.withValues(alpha: 0.6)
+                        : Colors.blue.withValues(alpha: 0.22),
                 width: editing ? 1.5 : 0.8,
               ),
               borderRadius: BorderRadius.circular(2),
