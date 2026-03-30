@@ -181,6 +181,7 @@ class PdfService {
       if (pageIdx < 0 || pageIdx >= doc.pages.count) continue;
 
       final page  = doc.pages[pageIdx];
+      final pageH = pageHeights[block.pageNumber] ?? page.size.height;
 
       // pdfLeft/pdfTop/pdfRight/pdfBottom are stored in Flutter space
       // (top-left origin, Y grows DOWN) by extractTextBlocks.
