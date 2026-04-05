@@ -211,7 +211,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
           ],
         ),
         body: Column(children: [
-          EditorToolbar(pdfController: _pdfController),
+          const EditorToolbar(),
           Expanded(
             child: Row(children: [
               // Left: thumbnails

@@ -146,7 +146,6 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
         .where((a) => a.pageNumber == doc.currentPage)
         .toList();
 
-    // ── editText tool: only text blocks respond ───────────────────────────
     if (tool == EditorTool.editText) {
       final hit = _hitBlock(
           ref.read(textBlockNotifierProvider), d.localPosition);
@@ -154,26 +153,10 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
       return;
     }
 
-    // ── select / default tool: click directly on a word to edit it ────────
-    // If the tap lands on a PDF text block open the inline editor immediately
-    // (just like clicking a word in Word).  Only do this when NO overlay
-    // annotation was tapped — annotation interaction takes priority.
     if (tool == EditorTool.select) {
-      final hitAnnot = _hitAnnotation(annotations, d.localPosition);
-      if (hitAnnot != null) {
-        // Tapped an overlay annotation — select it normally.
-        ref.read(selectedAnnotationIdProvider.notifier).state = hitAnnot.id;
-        return;
-      }
-      // No annotation hit — check for a PDF text block.
-      final hitBlock = _hitBlock(
-          ref.read(textBlockNotifierProvider), d.localPosition);
-      if (hitBlock != null) {
-        _startBlockEdit(hitBlock);
-        return;
-      }
-      // Tapped empty space — deselect.
-      ref.read(selectedAnnotationIdProvider.notifier).state = null;
+      final hit = _hitAnnotation(annotations, d.localPosition);
+      ref.read(selectedAnnotationIdProvider.notifier).state =
+          hit?.id;
       return;
     }
 
@@ -579,10 +562,9 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
       if (prev?.currentPage != next?.currentPage) _loadBlocks();
     });
 
-    // Reload blocks whenever the page changes (already handled by the
-    // currentDocumentProvider listener above) OR when the editText tool
-    // becomes active.  We ALSO keep blocks loaded in select mode so that
-    // the user can click directly on any word without switching tools.
+    // Reload blocks whenever the editText tool becomes active so they are
+    // always fresh (covers the case where the document was opened before
+    // the overlay was mounted, or the user switches tool after a page turn).
     ref.listen(selectedToolProvider, (prev, next) {
       if (next == EditorTool.editText && prev != EditorTool.editText) {
         _loadBlocks();
@@ -649,11 +631,11 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
                 child: SizedBox.expand(),
               ),
 
-              // ── Text block highlight overlays ────────────────────────────
-              // Shown in editText mode (bright outlines) AND select mode
-              // (subtle dashed outlines so the user knows words are clickable).
-              if (tool == EditorTool.editText || tool == EditorTool.select)
-                ..._buildBlockHighlights(textBlocks, tool),
+              // ── Text block highlight overlays (editText mode) ────────────
+              // Rendered ON TOP of CustomPaint so their GestureDetectors
+              // receive taps first when Edit Text tool is active.
+              if (tool == EditorTool.editText)
+                ..._buildBlockHighlights(textBlocks),
 
               // ── Overlay text annotation editor ───────────────────────────
               if (_editingAnnotationId != null)
@@ -679,76 +661,62 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
 
   // ── Text block highlights ─────────────────────────────────────────────────
 
-  List<Widget> _buildBlockHighlights(
-      List<PdfTextBlock> blocks, EditorTool tool) {
-    final isEditMode = tool == EditorTool.editText;
-
+  List<Widget> _buildBlockHighlights(List<PdfTextBlock> blocks) {
     return blocks.map((b) {
       final editing  = b.id == _editingBlockId;
       final modified = b.isEdited;
 
       return Positioned.fromRect(
         rect: b.screenRect,
-        child: MouseRegion(
-          // Text cursor when hovering over any word
-          cursor: SystemMouseCursors.text,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () {
-              _commitAnnotationEdit();
-              _commitBlockEdit();
-              _startBlockEdit(b);
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              decoration: BoxDecoration(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            _commitAnnotationEdit();
+            _commitBlockEdit();
+            _startBlockEdit(b);
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            decoration: BoxDecoration(
+              color: editing
+                  ? Colors.blue.withValues(alpha: 0.18)
+                  : modified
+                      ? Colors.green.withValues(alpha: 0.10)
+                      : Colors.blue.withValues(alpha: 0.04),
+              border: Border.all(
                 color: editing
-                    ? Colors.blue.withValues(alpha: 0.18)
+                    ? Colors.blue.withValues(alpha: 0.90)
                     : modified
-                        ? Colors.green.withValues(alpha: 0.10)
-                        : isEditMode
-                            // editText mode: visible blue tint
-                            ? Colors.blue.withValues(alpha: 0.04)
-                            // select mode: nearly invisible, just enough for hover
-                            : Colors.transparent,
-                border: Border.all(
-                  color: editing
-                      ? Colors.blue.withValues(alpha: 0.90)
-                      : modified
-                          ? Colors.green.withValues(alpha: 0.70)
-                          : isEditMode
-                              ? Colors.blue.withValues(alpha: 0.28)
-                              // select mode: very faint dashed-look via low alpha
-                              : Colors.blue.withValues(alpha: 0.08),
-                  width: editing ? 2.0 : (isEditMode ? 1.0 : 0.5),
-                ),
-                borderRadius: BorderRadius.circular(2),
+                        ? Colors.green.withValues(alpha: 0.70)
+                        : Colors.blue.withValues(alpha: 0.28),
+                width: editing ? 2.0 : 1.0,
               ),
-              child: modified && !editing
-                  ? Align(
-                      alignment: Alignment.centerLeft,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 2),
-                        child: Text(
-                          b.editedText,
-                          maxLines:  1,
-                          overflow:  TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize:   (b.effectiveFontSize * _scale)
-                                .clamp(8.0, 36.0),
-                            fontWeight: b.effectiveIsBold
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                            fontStyle:  b.effectiveIsItalic
-                                ? FontStyle.italic
-                                : FontStyle.normal,
-                            color: Color(b.effectiveColorArgb),
-                          ),
+              borderRadius: BorderRadius.circular(2),
+            ),
+            child: modified && !editing
+                ? Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: Text(
+                        b.editedText,
+                        maxLines:  1,
+                        overflow:  TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize:   (b.effectiveFontSize * _scale)
+                              .clamp(8.0, 36.0),
+                          fontWeight: b.effectiveIsBold
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                          fontStyle:  b.effectiveIsItalic
+                              ? FontStyle.italic
+                              : FontStyle.normal,
+                          color: Color(b.effectiveColorArgb),
                         ),
                       ),
-                    )
-                  : null,
-            ),
+                    ),
+                  )
+                : null,
           ),
         ),
       );

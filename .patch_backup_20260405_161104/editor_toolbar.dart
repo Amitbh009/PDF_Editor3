@@ -1,15 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pdfrx/pdfrx.dart';
 
 import '../providers/pdf_provider.dart';
 
 class EditorToolbar extends ConsumerWidget {
-  const EditorToolbar({super.key, required this.pdfController});
-
-  /// The same [PdfViewerController] used by [PdfViewer] — for zoom controls.
-  final PdfViewerController pdfController;
+  const EditorToolbar({super.key});
 
   // Tool list — editText is inserted as the second tool (after select)
   static const List<_ToolItem> _tools = <_ToolItem>[
@@ -180,90 +176,6 @@ class EditorToolbar extends ConsumerWidget {
                       .read(currentDocumentProvider.notifier)
                       .redo()
                   : null,
-            ),
-
-            const SizedBox(width: 8),
-
-            const _VSep(),
-
-            // ── Zoom controls ────────────────────────────────────────────
-            Tooltip(
-              message: 'Zoom out',
-              child: GestureDetector(
-                onTap: () {
-                  final newZoom =
-                      (pdfController.currentZoom / 1.25).clamp(0.1, 8.0);
-                  pdfController.zoomOnLocalPosition(
-                      newZoom, pdfController.centerPosition);
-                },
-                child: Container(
-                  width:  32,
-                  height: 32,
-                  margin: const EdgeInsets.symmetric(horizontal: 2),
-                  decoration: BoxDecoration(
-                    color:        Colors.grey.shade200,
-                    borderRadius: BorderRadius.circular(6),
-                    border:       Border.all(color: Colors.grey.shade400),
-                  ),
-                  child: const Icon(Icons.remove_rounded, size: 18),
-                ),
-              ),
-            ),
-
-            // Zoom-level badge — tapping resets to 100 %
-            Tooltip(
-              message: 'Reset to 100%',
-              child: GestureDetector(
-                onTap: () => pdfController.zoomOnLocalPosition(
-                    1.0, pdfController.centerPosition),
-                child: ValueListenableBuilder<Matrix4>(
-                  valueListenable: pdfController,
-                  builder: (_, matrix, __) {
-                    final zoom = pdfController.currentZoom;
-                    return Container(
-                      width:  54,
-                      height: 32,
-                      margin: const EdgeInsets.symmetric(horizontal: 2),
-                      decoration: BoxDecoration(
-                        color:        Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: Colors.grey.shade400),
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        '${(zoom * 100).round()}%',
-                        style: const TextStyle(
-                          fontSize:   11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-
-            Tooltip(
-              message: 'Zoom in',
-              child: GestureDetector(
-                onTap: () {
-                  final newZoom =
-                      (pdfController.currentZoom * 1.25).clamp(0.1, 8.0);
-                  pdfController.zoomOnLocalPosition(
-                      newZoom, pdfController.centerPosition);
-                },
-                child: Container(
-                  width:  32,
-                  height: 32,
-                  margin: const EdgeInsets.symmetric(horizontal: 2),
-                  decoration: BoxDecoration(
-                    color:        Colors.grey.shade200,
-                    borderRadius: BorderRadius.circular(6),
-                    border:       Border.all(color: Colors.grey.shade400),
-                  ),
-                  child: const Icon(Icons.add_rounded, size: 18),
-                ),
-              ),
             ),
 
             const SizedBox(width: 8),
