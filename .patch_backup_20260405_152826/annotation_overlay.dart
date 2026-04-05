@@ -51,12 +51,6 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
   final TextEditingController _blockCtrl  = TextEditingController();
   final FocusNode             _blockFocus = FocusNode();
 
-  // Per-session overrides (live preview while the popup is open)
-  double? _editFontSize;
-  bool?   _editIsBold;
-  bool?   _editIsItalic;
-  int?    _editColorArgb;
-
   // ── Scale factor (screen pixels per PDF point) ────────────────────────────
   // Updated from the PdfViewerController every build.
   double _scale = 1.0;
@@ -282,11 +276,6 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
       _blockCtrl.text   = block.editedText;
       _blockCtrl.selection = TextSelection(
           baseOffset: 0, extentOffset: block.editedText.length);
-      // Seed live-edit values from whatever is already stored on the block.
-      _editFontSize   = block.effectiveFontSize;
-      _editIsBold     = block.effectiveIsBold;
-      _editIsItalic   = block.effectiveIsItalic;
-      _editColorArgb  = block.effectiveColorArgb;
     });
     _blockFocus.requestFocus();
     ref.read(currentDocumentProvider.notifier).markModified();
@@ -294,36 +283,17 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
 
   void _commitBlockEdit() {
     if (_editingBlockId == null) return;
-    final notifier = ref.read(textBlockNotifierProvider.notifier);
-    notifier.updateBlock(_editingBlockId!, _blockCtrl.text);
-    notifier.updateBlockFormatting(
-      _editingBlockId!,
-      fontSize:   _editFontSize,
-      isBold:     _editIsBold,
-      isItalic:   _editIsItalic,
-      colorArgb:  _editColorArgb,
-    );
-    if (notifier.hasEdits) {
+    ref.read(textBlockNotifierProvider.notifier)
+        .updateBlock(_editingBlockId!, _blockCtrl.text);
+    if (ref.read(textBlockNotifierProvider.notifier).hasEdits) {
       ref.read(currentDocumentProvider.notifier).markModified();
     }
-    setState(() {
-      _editingBlockId = null;
-      _editFontSize   = null;
-      _editIsBold     = null;
-      _editIsItalic   = null;
-      _editColorArgb  = null;
-    });
+    setState(() => _editingBlockId = null);
     _blockFocus.unfocus();
   }
 
   void _cancelBlockEdit() {
-    setState(() {
-      _editingBlockId = null;
-      _editFontSize   = null;
-      _editIsBold     = null;
-      _editIsItalic   = null;
-      _editColorArgb  = null;
-    });
+    setState(() => _editingBlockId = null);
     _blockFocus.unfocus();
   }
 
@@ -663,9 +633,9 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
 
   List<Widget> _buildBlockHighlights(List<PdfTextBlock> blocks) {
     return blocks.map((b) {
-      final editing  = b.id == _editingBlockId;
-      final modified = b.isEdited;
-
+      final editing = b.id == _editingBlockId;
+      // NOTE: No IgnorePointer here — these widgets must be tappable so
+      // the GestureDetector parent can receive onTapUp and call _startBlockEdit.
       return Positioned.fromRect(
         rect: b.screenRect,
         child: GestureDetector(
@@ -675,55 +645,30 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
             _commitBlockEdit();
             _startBlockEdit(b);
           },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
+          child: Container(
             decoration: BoxDecoration(
               color: editing
-                  ? Colors.blue.withValues(alpha: 0.18)
-                  : modified
-                      ? Colors.green.withValues(alpha: 0.10)
-                      : Colors.blue.withValues(alpha: 0.04),
+                  ? Colors.blue.withValues(alpha: 0.15)
+                  : b.isEdited
+                      ? Colors.green.withValues(alpha: 0.12)
+                      : Colors.blue.withValues(alpha: 0.05),
               border: Border.all(
                 color: editing
-                    ? Colors.blue.withValues(alpha: 0.90)
-                    : modified
-                        ? Colors.green.withValues(alpha: 0.70)
-                        : Colors.blue.withValues(alpha: 0.28),
-                width: editing ? 2.0 : 1.0,
+                    ? Colors.blue.withValues(alpha: 0.80)
+                    : b.isEdited
+                        ? Colors.green.withValues(alpha: 0.65)
+                        : Colors.blue.withValues(alpha: 0.30),
+                width: editing ? 1.5 : 0.8,
               ),
               borderRadius: BorderRadius.circular(2),
             ),
-            child: modified && !editing
-                ? Align(
-                    alignment: Alignment.centerLeft,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 2),
-                      child: Text(
-                        b.editedText,
-                        maxLines:  1,
-                        overflow:  TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize:   (b.effectiveFontSize * _scale)
-                              .clamp(8.0, 36.0),
-                          fontWeight: b.effectiveIsBold
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                          fontStyle:  b.effectiveIsItalic
-                              ? FontStyle.italic
-                              : FontStyle.normal,
-                          color: Color(b.effectiveColorArgb),
-                        ),
-                      ),
-                    ),
-                  )
-                : null,
           ),
         ),
       );
     }).toList();
   }
 
-  // ── Block editor (Word-style in-place editor) ─────────────────────────────
+  // ── Block editor (Word-style inline editor) ───────────────────────────────
 
   Widget _buildBlockEditor(List<PdfTextBlock> blocks) {
     PdfTextBlock? block;
@@ -733,285 +678,93 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
       return const SizedBox.shrink();
     }
 
-    // Live values (fall back to block's effective values if not yet set)
-    final liveFontSize  = _editFontSize   ?? block.effectiveFontSize;
-    final liveIsBold    = _editIsBold     ?? block.effectiveIsBold;
-    final liveIsItalic  = _editIsItalic   ?? block.effectiveIsItalic;
-    final liveColor     = Color(_editColorArgb ?? block.effectiveColorArgb);
-
-    // ── Position the popup directly over the text block ──────────────────
-    // Give enough room for the two-row toolbar (≈68 px) above the block.
-    const toolbarH = 68.0;
-    const minEditorW = 240.0;
-
-    final blockW   = block.screenRect.width.clamp(minEditorW, 680.0);
-    final blockH   = block.screenRect.height.clamp(28.0, 200.0);
-    final rawLeft  = block.screenRect.left;
-    final rawTop   = block.screenRect.top - toolbarH;
-
-    // Keep within overlay bounds (clamped lazily; LayoutBuilder gives maxWidth)
-    final left = rawLeft.clamp(0.0, double.infinity);
-    final top  = rawTop .clamp(0.0, double.infinity);
+    final left  = block.screenRect.left;
+    final top   = block.screenRect.top - 32; // room for toolbar above
+    final width = block.screenRect.width.clamp(220.0, 640.0);
 
     return Positioned(
       left:  left,
-      top:   top,
-      width: blockW,
+      top:   top.clamp(0.0, double.infinity),
+      width: width,
       child: Material(
-        elevation: 12,
+        elevation:    8,
         borderRadius: BorderRadius.circular(6),
-        color: Colors.white,
-        shadowColor: Colors.black38,
+        color:        Colors.white,
         child: Column(
           mainAxisSize:       MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-
-            // ── Row 1: title + Done/Cancel ─────────────────────────────────
+            // toolbar
             Container(
-              height:  32,
+              height:  30,
               padding: const EdgeInsets.symmetric(horizontal: 8),
               decoration: const BoxDecoration(
                 color: Color(0xFF1565C0),
-                borderRadius: BorderRadius.vertical(top: Radius.circular(6)),
+                borderRadius:
+                    BorderRadius.vertical(top: Radius.circular(6)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.edit_document, size: 13, color: Colors.white70),
+                  const Icon(Icons.edit_document,
+                      size: 13, color: Colors.white70),
                   const SizedBox(width: 6),
                   const Expanded(
-                    child: Text(
-                      'Edit PDF Text',
-                      style: TextStyle(
-                        fontSize:   11,
-                        color:      Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    child: Text('Edit existing text',
+                        style: TextStyle(
+                            fontSize: 11,
+                            color:    Colors.white,
+                            fontWeight: FontWeight.w600)),
                   ),
-                  // Find & Replace button
-                  _miniIconBtn(Icons.find_replace_rounded, 'Find & Replace',
-                      () => _showFindReplace(context)),
-                  const SizedBox(width: 4),
                   _miniBtn('Done',   Colors.white,   _commitBlockEdit),
                   const SizedBox(width: 4),
                   _miniBtn('Cancel', Colors.white60, _cancelBlockEdit),
                 ],
               ),
             ),
-
-            // ── Row 2: formatting toolbar ──────────────────────────────────
-            Container(
-              height:  36,
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              color:   const Color(0xFFF0F4FF),
-              child: Row(
-                children: [
-                  // Font-size stepper
-                  const Text('Size:', style: TextStyle(fontSize: 10, color: Colors.black54)),
-                  const SizedBox(width: 4),
-                  _sizeBtn(Icons.remove, () {
-                    setState(() => _editFontSize = (liveFontSize - 1).clamp(6.0, 144.0));
-                  }),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Text(
-                      liveFontSize.round().toString(),
-                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                  _sizeBtn(Icons.add, () {
-                    setState(() => _editFontSize = (liveFontSize + 1).clamp(6.0, 144.0));
-                  }),
-
-                  const SizedBox(width: 8),
-
-                  // Bold
-                  _fmtToggle(
-                    label: 'B',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                    isActive: liveIsBold,
-                    onTap: () => setState(() => _editIsBold = !liveIsBold),
-                  ),
-                  const SizedBox(width: 2),
-                  // Italic
-                  _fmtToggle(
-                    label: 'I',
-                    style: const TextStyle(fontStyle: FontStyle.italic, fontSize: 13),
-                    isActive: liveIsItalic,
-                    onTap: () => setState(() => _editIsItalic = !liveIsItalic),
-                  ),
-
-                  const SizedBox(width: 8),
-
-                  // Color swatch
-                  Tooltip(
-                    message: 'Text colour',
-                    child: GestureDetector(
-                      onTap: () => _pickBlockColor(context, liveColor),
-                      child: Container(
-                        width: 22, height: 22,
-                        decoration: BoxDecoration(
-                          color:  liveColor,
-                          shape:  BoxShape.circle,
-                          border: Border.all(color: Colors.black26, width: 1.5),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  const Spacer(),
-
-                  // Reset formatting
-                  Tooltip(
-                    message: 'Reset formatting',
-                    child: GestureDetector(
-                      onTap: () => setState(() {
-                        _editFontSize  = block!.fontSize;
-                        _editIsBold    = block.isBold;
-                        _editIsItalic  = block.isItalic;
-                        _editColorArgb = block.colorArgb;
-                      }),
-                      child: const Icon(Icons.format_clear_rounded,
-                          size: 16, color: Colors.black45),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // ── Inline text field (sits exactly over the PDF text block) ───
-            SizedBox(
-              height: blockH + 8,
+            // editable field
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 4),
               child: TextField(
                 controller: _blockCtrl,
                 focusNode:  _blockFocus,
                 maxLines:   null,
-                expands:    true,
                 autofocus:  true,
                 style: TextStyle(
-                  fontSize:   (liveFontSize * _scale).clamp(9.0, 48.0),
-                  fontWeight: liveIsBold   ? FontWeight.bold   : FontWeight.normal,
-                  fontStyle:  liveIsItalic ? FontStyle.italic  : FontStyle.normal,
-                  color:      liveColor,
+                  fontSize:   (block.fontSize * _scale).clamp(10.0, 28.0),
+                  fontWeight: block.isBold   ? FontWeight.bold   : FontWeight.normal,
+                  fontStyle:  block.isItalic ? FontStyle.italic  : FontStyle.normal,
+                  color:      Color(block.colorArgb),
                 ),
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   isDense:        true,
-                  border:         const OutlineInputBorder(
-                    borderSide: BorderSide(color: Color(0xFF1565C0), width: 1.5),
-                  ),
-                  focusedBorder: const OutlineInputBorder(
-                    borderSide: BorderSide(color: Color(0xFF1565C0), width: 2),
-                  ),
+                  border:         OutlineInputBorder(),
                   contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                  hintText:  'Type replacement text…',
-                  hintStyle: const TextStyle(fontSize: 11, color: Colors.black38),
-                  // Show original text as a suffix hint
-                  suffixIcon: block.editedText != block.originalText
-                      ? Tooltip(
-                          message: 'Original: "${block.originalText}"',
-                          child: const Icon(Icons.history_rounded,
-                              size: 14, color: Colors.black26),
-                        )
-                      : null,
+                      EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  hintText: 'Type replacement text…',
+                  hintStyle:
+                      TextStyle(fontSize: 11, color: Colors.black38),
                 ),
                 onSubmitted: (_) => _commitBlockEdit(),
               ),
             ),
-
-            // ── Status bar ─────────────────────────────────────────────────
-            Container(
-              height:  18,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              color:   const Color(0xFFE8EEF8),
-              child: Row(
-                children: [
-                  Text(
-                    'Original: "${block.originalText}"',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize:  9,
-                      color:     Colors.black45,
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
-                  const Spacer(),
-                  if (block.isEdited)
-                    const Text('● edited',
-                        style: TextStyle(
-                          fontSize: 9,
-                          color:    Color(0xFF388E3C),
-                          fontWeight: FontWeight.w600,
-                        )),
-                ],
+            // original hint
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
+              child: Text(
+                'Original: "${block.originalText}"',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 9,
+                    color:    Colors.black38,
+                    fontStyle: FontStyle.italic),
               ),
             ),
-
           ],
         ),
       ),
     );
   }
-
-  // ── Formatting helper widgets ─────────────────────────────────────────────
-
-  Widget _sizeBtn(IconData icon, VoidCallback onTap) => GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width:  20, height: 20,
-          decoration: BoxDecoration(
-            color:        Colors.white,
-            borderRadius: BorderRadius.circular(3),
-            border:       Border.all(color: Colors.black12),
-          ),
-          child: Icon(icon, size: 12, color: Colors.black54),
-        ),
-      );
-
-  Widget _fmtToggle({
-    required String   label,
-    required TextStyle style,
-    required bool     isActive,
-    required VoidCallback onTap,
-  }) =>
-      GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 100),
-          width:   24, height: 24,
-          decoration: BoxDecoration(
-            color:        isActive
-                ? const Color(0xFF1565C0).withValues(alpha: 0.15)
-                : Colors.white,
-            borderRadius: BorderRadius.circular(3),
-            border:       Border.all(
-              color: isActive
-                  ? const Color(0xFF1565C0)
-                  : Colors.black12,
-            ),
-          ),
-          alignment: Alignment.center,
-          child: Text(label, style: style.copyWith(fontSize: 12)),
-        ),
-      );
-
-  Widget _miniIconBtn(IconData icon, String tooltip, VoidCallback onTap) =>
-      Tooltip(
-        message: tooltip,
-        child: GestureDetector(
-          onTap: onTap,
-          child: Container(
-            padding:    const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color:        Colors.white.withValues(alpha: 0.18),
-              borderRadius: BorderRadius.circular(3),
-            ),
-            child: Icon(icon, size: 13, color: Colors.white),
-          ),
-        ),
-      );
 
   Widget _miniBtn(String label, Color color, VoidCallback onTap) =>
       GestureDetector(
@@ -1029,172 +782,6 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
                   fontWeight: FontWeight.w600)),
         ),
       );
-
-  // ── Colour picker for block text ─────────────────────────────────────────
-
-  void _pickBlockColor(BuildContext context, Color current) {
-    // Use a simple color panel dialog (flutter_colorpicker is in dependencies)
-    Color picked = current;
-    showDialog<void>(
-      context: context,
-      builder: (_) {
-        return StatefulBuilder(builder: (ctx, setDlg) {
-          return AlertDialog(
-            title: const Text('Text Colour', style: TextStyle(fontSize: 14)),
-            contentPadding: const EdgeInsets.all(12),
-            content: SizedBox(
-              width: 280,
-              child: Wrap(
-                spacing: 8, runSpacing: 8,
-                children: [
-                  // Quick palette
-                  for (final c in [
-                    Colors.black,
-                    Colors.white,
-                    Colors.red,
-                    Colors.blue,
-                    Colors.green.shade700,
-                    Colors.orange,
-                    Colors.purple,
-                    Colors.brown,
-                    Colors.grey,
-                    Colors.teal,
-                    Colors.pink,
-                    Colors.indigo,
-                  ])
-                    GestureDetector(
-                      onTap: () => setDlg(() => picked = c),
-                      child: Container(
-                        width: 32, height: 32,
-                        decoration: BoxDecoration(
-                          color:  c,
-                          shape:  BoxShape.circle,
-                          border: Border.all(
-                            color: picked == c
-                                ? Colors.blue
-                                : Colors.black12,
-                            width: picked == c ? 3 : 1,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Cancel')),
-              FilledButton(
-                onPressed: () {
-                  // ignore: deprecated_member_use
-                  setState(() => _editColorArgb = picked.value);
-                  Navigator.pop(ctx);
-                },
-                child: const Text('Apply'),
-              ),
-            ],
-          );
-        });
-      },
-    );
-  }
-
-  // ── Find & Replace dialog ─────────────────────────────────────────────────
-
-  void _showFindReplace(BuildContext context) {
-    final findCtrl    = TextEditingController();
-    final replaceCtrl = TextEditingController();
-    bool caseSensitive = false;
-
-    showDialog<void>(
-      context: context,
-      builder: (_) {
-        return StatefulBuilder(builder: (ctx, setDlg) {
-          return AlertDialog(
-            title: const Row(
-              children: [
-                Icon(Icons.find_replace_rounded, size: 18, color: Color(0xFF1565C0)),
-                SizedBox(width: 8),
-                Text('Find & Replace', style: TextStyle(fontSize: 15)),
-              ],
-            ),
-            content: SizedBox(
-              width: 340,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: findCtrl,
-                    autofocus:  true,
-                    decoration: const InputDecoration(
-                      labelText:      'Find text',
-                      prefixIcon:     Icon(Icons.search_rounded, size: 18),
-                      border:         OutlineInputBorder(),
-                      isDense:        true,
-                      contentPadding: EdgeInsets.all(10),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: replaceCtrl,
-                    decoration: const InputDecoration(
-                      labelText:      'Replace with',
-                      prefixIcon:     Icon(Icons.edit_rounded, size: 18),
-                      border:         OutlineInputBorder(),
-                      isDense:        true,
-                      contentPadding: EdgeInsets.all(10),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Checkbox(
-                        value:     caseSensitive,
-                        onChanged: (v) => setDlg(() => caseSensitive = v!),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      const Text('Case sensitive',
-                          style: TextStyle(fontSize: 12)),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Cancel')),
-              FilledButton.icon(
-                icon:  const Icon(Icons.find_replace_rounded, size: 16),
-                label: const Text('Replace All'),
-                onPressed: () {
-                  final count = ref
-                      .read(textBlockNotifierProvider.notifier)
-                      .findAndReplace(
-                        findCtrl.text,
-                        replaceCtrl.text,
-                        caseSensitive: caseSensitive,
-                      );
-                  Navigator.pop(ctx);
-                  if (count > 0) {
-                    ref.read(currentDocumentProvider.notifier).markModified();
-                  }
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content:  Text(count > 0
-                        ? 'Replaced $count block${count == 1 ? '' : 's'}.'
-                        : 'No matches found.'),
-                    behavior: SnackBarBehavior.floating,
-                    duration: const Duration(seconds: 2),
-                  ));
-                },
-              ),
-            ],
-          );
-        });
-      },
-    );
-  }
 
   // ── Overlay annotation text editor ────────────────────────────────────────
 

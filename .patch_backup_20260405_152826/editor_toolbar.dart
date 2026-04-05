@@ -30,36 +30,8 @@ class EditorToolbar extends ConsumerWidget {
     final canUndo       = ref.watch(canUndoProvider);
     final canRedo       = ref.watch(canRedoProvider);
     final theme         = Theme.of(context);
-    final isEditText    = selectedTool == EditorTool.editText;
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-      // ── Context hint banner (shown only in Edit Text mode) ─────────────
-      if (isEditText)
-        Container(
-          width:   double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          color:   const Color(0xFF1565C0),
-          child: Row(
-            children: [
-              const Icon(Icons.touch_app_rounded, size: 13, color: Colors.white70),
-              const SizedBox(width: 6),
-              const Expanded(
-                child: Text(
-                  'Click any blue-outlined text block to edit it in-place  •  '
-                  'Use the formatting toolbar to change font size, bold, italic, or colour  •  '
-                  'Find & Replace available in the editor popup',
-                  style: TextStyle(fontSize: 10, color: Colors.white70),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-        ),
-
-      // ── Main toolbar row ───────────────────────────────────────────────
-      Container(
+    return Container(
       height: 56,
       decoration: BoxDecoration(
         color:  theme.colorScheme.surfaceContainerHighest,
@@ -182,9 +154,7 @@ class EditorToolbar extends ConsumerWidget {
           ],
         ),
       ),
-    ), // end main toolbar Container
-    ], // end Column children
-    ); // end Column
+    );
   }
 
   void _showColorPicker(

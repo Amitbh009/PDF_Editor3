@@ -197,12 +197,12 @@ class PdfService {
       // (b) Redraw replacement text.
       if (block.editedText.trim().isNotEmpty) {
         final fontFamily = _matchFont(block.fontName);
-        final font = _makeFont(fontFamily, block.effectiveFontSize,
-            isBold: block.effectiveIsBold, isItalic: block.effectiveIsItalic);
+        final font = _makeFont(fontFamily, block.fontSize,
+            isBold: block.isBold, isItalic: block.isItalic);
         page.graphics.drawString(
           block.editedText,
           font,
-          brush:  sf.PdfSolidBrush(_sfColor(block.effectiveColorArgb)),
+          brush:  sf.PdfSolidBrush(_sfColor(block.colorArgb)),
           bounds: sfRect,
         );
       }

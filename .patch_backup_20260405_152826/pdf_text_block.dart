@@ -23,12 +23,7 @@ class PdfTextBlock {
     required this.isBold,
     required this.isItalic,
     required this.colorArgb,
-    this.isEdited    = false,
-    this.isSelected  = false,
-    this.overrideFontSize,
-    this.overrideIsBold,
-    this.overrideIsItalic,
-    this.overrideColorArgb,
+    this.isEdited = false,
   });
 
   final String id;
@@ -60,21 +55,6 @@ class PdfTextBlock {
 
   bool isEdited;
 
-  // ── Mutable editing properties ───────────────────────────────────────────
-  /// True when this block is visually selected / active in the editor.
-  bool isSelected;
-
-  // Per-block overrides (set when user changes formatting in the editor)
-  double?  overrideFontSize;
-  bool?    overrideIsBold;
-  bool?    overrideIsItalic;
-  int?     overrideColorArgb;
-
-  double get effectiveFontSize   => overrideFontSize   ?? fontSize;
-  bool   get effectiveIsBold     => overrideIsBold     ?? isBold;
-  bool   get effectiveIsItalic   => overrideIsItalic   ?? isItalic;
-  int    get effectiveColorArgb  => overrideColorArgb  ?? colorArgb;
-
   PdfTextBlock withScreenRect(Rect rect) => PdfTextBlock(
         id:           id,
         pageNumber:   pageNumber,
@@ -91,10 +71,5 @@ class PdfTextBlock {
         isItalic:     isItalic,
         colorArgb:    colorArgb,
         isEdited:     isEdited,
-        isSelected:   isSelected,
-        overrideFontSize:    overrideFontSize,
-        overrideIsBold:      overrideIsBold,
-        overrideIsItalic:    overrideIsItalic,
-        overrideColorArgb:   overrideColorArgb,
       );
 }

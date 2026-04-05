@@ -81,55 +81,10 @@ class TextBlockNotifier extends StateNotifier<List<PdfTextBlock>> {
     state = state.map((b) {
       if (b.id != id) return b;
       b.editedText = newText;
-      b.isEdited   = newText != b.originalText ||
-                     b.overrideFontSize  != null ||
-                     b.overrideIsBold    != null ||
-                     b.overrideIsItalic  != null ||
-                     b.overrideColorArgb != null;
+      b.isEdited   = newText != b.originalText;
       return b;
     }).toList();
-    state = List.from(state);
-  }
-
-  void updateBlockFormatting(
-    String id, {
-    double? fontSize,
-    bool?   isBold,
-    bool?   isItalic,
-    int?    colorArgb,
-  }) {
-    state = state.map((b) {
-      if (b.id != id) return b;
-      if (fontSize  != null) b.overrideFontSize   = fontSize;
-      if (isBold    != null) b.overrideIsBold      = isBold;
-      if (isItalic  != null) b.overrideIsItalic    = isItalic;
-      if (colorArgb != null) b.overrideColorArgb   = colorArgb;
-      b.isEdited = true;
-      return b;
-    }).toList();
-    state = List.from(state);
-  }
-
-  /// Find and replace across all loaded blocks on the current page.
-  int findAndReplace(String find, String replace, {bool caseSensitive = false}) {
-    if (find.isEmpty) return 0;
-    int count = 0;
-    state = state.map((b) {
-      final source  = caseSensitive ? b.editedText : b.editedText.toLowerCase();
-      final pattern = caseSensitive ? find          : find.toLowerCase();
-      if (!source.contains(pattern)) return b;
-      final replaced = caseSensitive
-          ? b.editedText.replaceAll(find, replace)
-          : b.editedText.replaceAllMapped(
-              RegExp(RegExp.escape(find), caseSensitive: false),
-              (_) => replace);
-      b.editedText = replaced;
-      b.isEdited   = replaced != b.originalText;
-      count++;
-      return b;
-    }).toList();
-    state = List.from(state);
-    return count;
+    state = List.from(state); // force Riverpod rebuild
   }
 
   void clear() => state = [];
