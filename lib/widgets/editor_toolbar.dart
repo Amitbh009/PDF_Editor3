@@ -194,7 +194,8 @@ class EditorToolbar extends ConsumerWidget {
                   final newZoom =
                       (pdfController.currentZoom / 1.25).clamp(0.1, 8.0);
                   pdfController.zoomOnLocalPosition(
-                      newZoom, pdfController.centerPosition);
+                      localPosition: pdfController.centerPosition,
+                      newZoom: newZoom);
                 },
                 child: Container(
                   width:  32,
@@ -215,7 +216,8 @@ class EditorToolbar extends ConsumerWidget {
               message: 'Reset to 100%',
               child: GestureDetector(
                 onTap: () => pdfController.zoomOnLocalPosition(
-                    1.0, pdfController.centerPosition),
+                    localPosition: pdfController.centerPosition,
+                    newZoom: 1.0),
                 child: ValueListenableBuilder<Matrix4>(
                   valueListenable: pdfController,
                   builder: (_, matrix, __) {
@@ -250,7 +252,8 @@ class EditorToolbar extends ConsumerWidget {
                   final newZoom =
                       (pdfController.currentZoom * 1.25).clamp(0.1, 8.0);
                   pdfController.zoomOnLocalPosition(
-                      newZoom, pdfController.centerPosition);
+                      localPosition: pdfController.centerPosition,
+                      newZoom: newZoom);
                 },
                 child: Container(
                   width:  32,
