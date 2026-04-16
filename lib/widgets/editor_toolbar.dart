@@ -45,7 +45,7 @@ class EditorToolbar extends ConsumerWidget {
           width:   double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           color:   const Color(0xFF1565C0),
-          child: Row(
+          child: const Row(
             children: [
               const Icon(Icons.touch_app_rounded, size: 13, color: Colors.white70),
               const SizedBox(width: 6),
