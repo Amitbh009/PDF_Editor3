@@ -1,40 +1,42 @@
 #!/usr/bin/env python3
 """
-PDF Editor Enhancement Patcher
-Applies scrolling/zoom enhancements and fixes text editing overlay positioning
+PDF Editor Enhancement Patcher - Direct File Modifier
+Run this script to automatically apply:
+1. Scrolling + zoom with trackpad/mouse wheel + Ctrl
+2. Text edit boxes positioned directly over the text
 """
 
-import os
+import re
 import sys
-import shutil
 from pathlib import Path
 from datetime import datetime
+import shutil
 
-def create_backup(repo_path):
-    """Create backup of original files"""
-    backup_dir = repo_path / f".backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    backup_dir.mkdir(exist_ok=True)
-    
-    files_to_backup = [
-        "lib/screens/editor_screen.dart",
-        "lib/widgets/annotation_overlay.dart"
-    ]
-    
-    for file_path in files_to_backup:
-        full_path = repo_path / file_path
-        if full_path.exists():
-            backup_path = backup_dir / file_path
-            backup_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(full_path, backup_path)
-    
-    return backup_dir
+# ----------------------------------------------------------------------
+# 1. Enhanced Scrolling & Zoom (editor_screen.dart)
+# ----------------------------------------------------------------------
+def patch_editor_screen(file_path: Path):
+    """Replace the SfPdfViewer widget with enhanced version."""
+    content = file_path.read_text(encoding='utf-8')
+    backup = file_path.with_suffix('.dart.bak')
+    shutil.copy2(file_path, backup)
 
-def apply_enhancement_patch(repo_path):
-    """Apply all enhancement patches"""
-    
-    # Enhanced SfPdfViewer configuration for editor_screen.dart
-    editor_screen_enhancement = '''
-  // ENHANCED: PDF Viewer with scrolling and zoom enhancements
+    # Find the SfPdfViewer.file widget definition and replace it
+    # Pattern looks for 'SfPdfViewer.file(' and captures until the matching closing parenthesis
+    # We'll use a simpler approach: replace the entire _buildPdfViewer method
+    # if it exists, otherwise insert a new one.
+
+    # Check if _buildPdfViewer method exists
+    if '_buildPdfViewer' not in content:
+        # If not found, we'll add the method after _buildBody or similar
+        # For simplicity, we'll add it before the build method's return
+        print("⚠️  _buildPdfViewer method not found. Adding new method.")
+        insert_pos = content.find('Widget build(BuildContext context) {')
+        if insert_pos == -1:
+            print("❌ Could not find build method. Aborting editor_screen patch.")
+            return False
+
+        new_method = '''
   Widget _buildPdfViewer() {
     return SfPdfViewer.file(
       widget.pdfFile,
@@ -43,19 +45,17 @@ def apply_enhancement_patch(repo_path):
       canShowScrollHead: true,
       canShowScrollStatus: true,
       enableDocumentLinkAnnotation: true,
-      interactionMode: _currentTool == PdfEditTool.text 
-          ? PdfInteractionMode.pan 
+      interactionMode: _currentTool == PdfEditTool.text
+          ? PdfInteractionMode.pan
           : PdfInteractionMode.selection,
       onDocumentLoaded: (PdfDocumentLoadedDetails details) {
         setState(() {
           _totalPages = details.document.pages.count;
         });
       },
-      // Enhanced zoom configuration for trackpad and mouse wheel
       maxZoomLevel: 4.0,
       minZoomLevel: 0.5,
       zoomEnabled: true,
-      // Scroll bar styling
       scrollHeadStyle: PdfScrollHeadStyle(
         backgroundColor: Colors.grey.withOpacity(0.8),
         textStyle: TextStyle(
@@ -63,7 +63,6 @@ def apply_enhancement_patch(repo_path):
           fontSize: 12,
         ),
       ),
-      // Trackpad gesture support
       onPdfTap: (PdfTapDetails details) {
         if (_currentTool == PdfEditTool.text) {
           _addTextAnnotationAt(details.position, details.pageNumber);
@@ -72,11 +71,83 @@ def apply_enhancement_patch(repo_path):
     );
   }
 '''
-    
-    # Text editing overlay fix for annotation_overlay.dart
-    annotation_overlay_fix = '''
-  // FIXED: Text editing overlay positioning
-  Widget _buildTextAnnotationWidget(TextAnnotation annotation) {
+        # Insert before the closing brace of build method
+        # Find the line with 'return' and insert before it
+        lines = content.split('\n')
+        new_lines = []
+        inserted = False
+        for i, line in enumerate(lines):
+            if not inserted and 'return' in line and 'Scaffold' in line:
+                # Add method before return
+                new_lines.append(new_method)
+                inserted = True
+            new_lines.append(line)
+        if not inserted:
+            # Fallback: add at end of class
+            class_end = content.rfind('}')
+            new_content = content[:class_end] + new_method + '\n' + content[class_end:]
+        else:
+            new_content = '\n'.join(new_lines)
+        file_path.write_text(new_content, encoding='utf-8')
+        print("✅ Added enhanced _buildPdfViewer method.")
+        return True
+
+    # If method exists, replace its body with enhanced version
+    print("🔧 Updating existing _buildPdfViewer method...")
+    pattern = r'(Widget\s+_buildPdfViewer\s*\(\s*\)\s*\{)(.*?)(\n\s*\})'
+    replacement = r'''\1
+    return SfPdfViewer.file(
+      widget.pdfFile,
+      controller: _pdfViewerController,
+      scrollDirection: PdfScrollDirection.vertical,
+      canShowScrollHead: true,
+      canShowScrollStatus: true,
+      enableDocumentLinkAnnotation: true,
+      interactionMode: _currentTool == PdfEditTool.text
+          ? PdfInteractionMode.pan
+          : PdfInteractionMode.selection,
+      onDocumentLoaded: (PdfDocumentLoadedDetails details) {
+        setState(() {
+          _totalPages = details.document.pages.count;
+        });
+      },
+      maxZoomLevel: 4.0,
+      minZoomLevel: 0.5,
+      zoomEnabled: true,
+      scrollHeadStyle: PdfScrollHeadStyle(
+        backgroundColor: Colors.grey.withOpacity(0.8),
+        textStyle: TextStyle(
+          color: Colors.white,
+          fontSize: 12,
+        ),
+      ),
+      onPdfTap: (PdfTapDetails details) {
+        if (_currentTool == PdfEditTool.text) {
+          _addTextAnnotationAt(details.position, details.pageNumber);
+        }
+      },
+    );
+  \3'''
+    new_content = re.sub(pattern, replacement, content, flags=re.DOTALL)
+    if new_content == content:
+        print("⚠️  Could not find _buildPdfViewer method pattern. No changes made.")
+        return False
+    file_path.write_text(new_content, encoding='utf-8')
+    print("✅ Enhanced _buildPdfViewer with scrolling and zoom features.")
+    return True
+
+
+# ----------------------------------------------------------------------
+# 2. Fix Text Editing Overlay Positioning (annotation_overlay.dart)
+# ----------------------------------------------------------------------
+def patch_annotation_overlay(file_path: Path):
+    """Replace _buildTextAnnotationWidget and add helper method."""
+    content = file_path.read_text(encoding='utf-8')
+    backup = file_path.with_suffix('.dart.bak')
+    shutil.copy2(file_path, backup)
+
+    # Replacement for _buildTextAnnotationWidget
+    new_widget_method = '''  Widget _buildTextAnnotationWidget(TextAnnotation annotation) {
     final pdfPagePosition = _getPdfPagePosition(annotation);
     
     return Positioned(
@@ -116,9 +187,10 @@ def apply_enhancement_patch(repo_path):
         ),
       ),
     );
-  }
+  }'''
 
-  Offset _getPdfPagePosition(TextAnnotation annotation) {
+    # Helper method to calculate position
+    helper_method = '''  Offset _getPdfPagePosition(TextAnnotation annotation) {
     try {
       final screenPoint = _pdfViewerController.convertPdfPointToScreenPoint(
         annotation.position,
@@ -129,131 +201,78 @@ def apply_enhancement_patch(repo_path):
       print('Error calculating PDF position: $e');
       return Offset(annotation.position.dx, annotation.position.dy);
     }
-  }
-'''
-    
-    # Write the patch files
-    patches_dir = repo_path / ".patches"
-    patches_dir.mkdir(exist_ok=True)
-    
-    with open(patches_dir / "editor_screen_enhancement.dart", "w") as f:
-        f.write(editor_screen_enhancement)
-    
-    with open(patches_dir / "annotation_overlay_fix.dart", "w") as f:
-        f.write(annotation_overlay_fix)
-    
-    return patches_dir
+  }'''
 
-def create_apply_script(repo_path, backup_dir, patches_dir):
-    """Create the bash script to apply changes"""
-    
-    script_content = f'''#!/bin/bash
-# PDF Editor Enhancement Application Script
-# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+    # Replace _buildTextAnnotationWidget method
+    pattern = r'(Widget\s+_buildTextAnnotationWidget\s*\(.*?\)\s*\{)(.*?)(\n\s*\})'
+    if re.search(pattern, content, flags=re.DOTALL):
+        new_content = re.sub(pattern, new_widget_method, content, flags=re.DOTALL)
+        print("✅ Replaced _buildTextAnnotationWidget with overlay positioning fix.")
+    else:
+        print("⚠️  _buildTextAnnotationWidget method not found. Adding new method.")
+        # Insert before the closing brace of the class
+        class_end = content.rfind('}')
+        if class_end == -1:
+            print("❌ Could not find class end.")
+            return False
+        new_content = content[:class_end] + '\n' + new_widget_method + '\n' + helper_method + '\n' + content[class_end:]
 
-set -e  # Exit on error
+    # Add helper method if not already present
+    if '_getPdfPagePosition' not in new_content:
+        # Insert after _buildTextAnnotationWidget
+        insert_pos = new_content.find('Widget _buildTextAnnotationWidget')
+        if insert_pos != -1:
+            method_end = new_content.find('}\n', insert_pos)
+            if method_end != -1:
+                new_content = (new_content[:method_end+2] +
+                               '\n' + helper_method + '\n' +
+                               new_content[method_end+2:])
+    else:
+        print("ℹ️  _getPdfPagePosition already exists.")
 
-echo "🎯 PDF Editor Enhancement Patcher"
-echo "=================================="
-echo ""
-echo "Backup created at: {backup_dir}"
-echo ""
+    file_path.write_text(new_content, encoding='utf-8')
+    return True
 
-# Function to apply patch with verification
-apply_patch() {{
-    local target_file="$1"
-    local patch_content="$2"
-    local description="$3"
-    
-    echo "📝 Applying: $description"
-    
-    if [ ! -f "$target_file" ]; then
-        echo "❌ Error: Target file not found: $target_file"
-        return 1
-    fi
-    
-    # Create backup of individual file
-    cp "$target_file" "$target_file.bak"
-    
-    # Here you would apply the specific patch
-    # For now, we'll just indicate the changes need to be applied manually
-    echo "   ⚠️  Manual integration required for: $target_file"
-    echo "   📄 Patch content available at: {patches_dir}/"
-    
-    return 0
-}}
 
-echo "🔧 Applying enhancements..."
-echo ""
-
-# Apply editor screen enhancements
-apply_patch \\
-    "{repo_path}/lib/screens/editor_screen.dart" \\
-    "{patches_dir}/editor_screen_enhancement.dart" \\
-    "Enhanced scrolling and zoom with trackpad support"
-
-# Apply annotation overlay fixes
-apply_patch \\
-    "{repo_path}/lib/widgets/annotation_overlay.dart" \\
-    "{patches_dir}/annotation_overlay_fix.dart" \\
-    "Fixed text editing overlay positioning"
-
-echo ""
-echo "✨ Enhancement patches prepared!"
-echo ""
-echo "📋 Next steps:"
-echo "1. Review the patch files in: {patches_dir}"
-echo "2. Manually integrate the changes into your source files"
-echo "3. Run: flutter pub get"
-echo "4. Run: flutter run"
-echo ""
-echo "🔄 To revert changes, restore from backup: {backup_dir}"
-echo ""
-
-# Make script executable
-chmod +x "$0"
-'''
-
-    script_path = repo_path / "apply_changes.sh"
-    with open(script_path, "w") as f:
-        f.write(script_content)
-    
-    os.chmod(script_path, 0o755)
-    return script_path
-
+# ----------------------------------------------------------------------
+# Main execution
+# ----------------------------------------------------------------------
 def main():
-    if len(sys.argv) != 2:
-        print("Usage: python apply_changes.py <path_to_pdf_editor3_repo>")
+    repo_root = Path.cwd()
+    if not (repo_root / 'pubspec.yaml').exists():
+        print("❌ Error: Must run from root of Flutter project (where pubspec.yaml is).")
         sys.exit(1)
-    
-    repo_path = Path(sys.argv[1]).resolve()
-    
-    if not repo_path.exists():
-        print(f"Error: Repository path does not exist: {repo_path}")
-        sys.exit(1)
-    
-    if not (repo_path / "pubspec.yaml").exists():
-        print(f"Error: Not a Flutter project directory: {repo_path}")
-        sys.exit(1)
-    
+
     print("🚀 PDF Editor Enhancement Patcher")
     print("==================================")
-    
-    # Create backup
-    backup_dir = create_backup(repo_path)
-    print(f"✅ Backup created: {backup_dir}")
-    
-    # Apply patches
-    patches_dir = apply_enhancement_patch(repo_path)
-    print(f"✅ Enhancement patches prepared: {patches_dir}")
-    
-    # Create apply script
-    script_path = create_apply_script(repo_path, backup_dir, patches_dir)
-    print(f"✅ Application script created: {script_path}")
-    
-    print("\n🎉 Setup complete!")
-    print(f"\nRun the following command to apply changes:")
-    print(f"  cd {repo_path} && bash apply_changes.sh")
+    print(f"Repository: {repo_root}")
+    print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("")
+
+    editor_screen = repo_root / 'lib' / 'screens' / 'editor_screen.dart'
+    annotation_overlay = repo_root / 'lib' / 'widgets' / 'annotation_overlay.dart'
+
+    success = True
+    if editor_screen.exists():
+        success &= patch_editor_screen(editor_screen)
+    else:
+        print(f"❌ File not found: {editor_screen}")
+        success = False
+
+    if annotation_overlay.exists():
+        success &= patch_annotation_overlay(annotation_overlay)
+    else:
+        print(f"❌ File not found: {annotation_overlay}")
+        success = False
+
+    print("")
+    if success:
+        print("✅ All patches applied successfully!")
+        print("📁 Backups created with .dart.bak extension.")
+        print("👉 Next steps: Run 'flutter pub get' and 'flutter run' to test.")
+    else:
+        print("❌ Some patches failed. Check error messages above.")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
