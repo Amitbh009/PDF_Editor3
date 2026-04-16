@@ -222,10 +222,11 @@ jobs:
         run: |
           $src = "build\windows\x64\runner\Release"
           $dst = "PDFEditor-Windows-Portable"
+          $safeRefName = "${{ github.ref_name }}" -replace '[\\/:*?"<>|]', '-'
           New-Item -ItemType Directory -Path $dst -Force
           Copy-Item -Recurse "$src\*" "$dst\"
           Compress-Archive -Path $dst `
-            -DestinationPath "PDFEditor-Portable-${{ github.ref_name }}.zip"
+            -DestinationPath "PDFEditor-Portable-$safeRefName.zip"
 
       - name: Install NSIS (tag only)
         if: startsWith(github.ref, 'refs/tags/')
