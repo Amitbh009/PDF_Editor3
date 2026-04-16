@@ -516,6 +516,18 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
     _resetDraw();
   }
 
+  bool _shouldHandlePanGestures(EditorTool tool) {
+    return switch (tool) {
+      EditorTool.freehand ||
+      EditorTool.rectangle ||
+      EditorTool.circle ||
+      EditorTool.highlight ||
+      EditorTool.underline ||
+      EditorTool.strikethrough => true,
+      _ => false,
+    };
+  }
+
   void _resetDraw() {
     setState(() {
       _drawStart      = null;
@@ -573,6 +585,7 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
     final doc        = ref.watch(currentDocumentProvider);
     final selectedId = ref.watch(selectedAnnotationIdProvider);
     final textBlocks = ref.watch(textBlockNotifierProvider);
+    final handlePan  = _shouldHandlePanGestures(tool);
 
     // React to page changes
     ref.listen(currentDocumentProvider, (prev, next) {
@@ -621,9 +634,9 @@ class _AnnotationOverlayState extends ConsumerState<AnnotationOverlay> {
       child: MouseRegion(
         cursor: cursor,
         child: GestureDetector(
-          onPanStart:      _onPanStart,
-          onPanUpdate:     _onPanUpdate,
-          onPanEnd:        _onPanEnd,
+          onPanStart:      handlePan ? _onPanStart : null,
+          onPanUpdate:     handlePan ? _onPanUpdate : null,
+          onPanEnd:        handlePan ? _onPanEnd : null,
           onTapUp:         _onTapUp,
           onDoubleTapDown: _onDoubleTap,
           child: Stack(
